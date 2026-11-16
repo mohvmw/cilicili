@@ -70,6 +70,11 @@ struct BiliPlayerNativeControlsActionBuilder {
                 } else {
                     configuration.onRequestFullscreen?()
                 }
+            },
+            onToggleHDR: {
+                guard !viewModel.isTerminated else { return }
+                visibilityActions.markInteraction()
+                configuration.onToggleHDR?()
             }
         )
     }

@@ -9,6 +9,7 @@ enum MineOverlayRoute: Hashable {
     case interfaceSettings
     case homeAndSearchSettings
     case playbackSettings
+    case hdrVisionSettings
     case cacheSettings
     case developerDiagnostics
     case contentFilterSettings
@@ -24,6 +25,7 @@ enum MineOverlayRoute: Hashable {
         case .interfaceSettings: "界面设置"
         case .homeAndSearchSettings: "首页与搜索"
         case .playbackSettings: "播放设置"
+        case .hdrVisionSettings: "HDR 视界"
         case .cacheSettings: "缓存管理"
         case .developerDiagnostics: "开发者诊断"
         case .contentFilterSettings: "内容过滤"
@@ -33,7 +35,8 @@ enum MineOverlayRoute: Hashable {
 
     var isSettingsRoute: Bool {
         switch self {
-        case .interfaceSettings, .homeAndSearchSettings, .playbackSettings, .contentFilterSettings,
+        case .interfaceSettings, .homeAndSearchSettings, .playbackSettings, .hdrVisionSettings,
+             .contentFilterSettings,
              .privacySettings, .cacheSettings, .developerDiagnostics, .accountManagement:
             true
         case .accountMessages, .history, .favorites, .watchLater:

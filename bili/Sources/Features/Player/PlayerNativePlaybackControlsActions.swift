@@ -8,4 +8,6 @@ struct PlayerNativePlaybackControlsActions {
     let onTogglePlayback: () -> Void
     let onToggleDanmaku: () -> Void
     let onToggleFullscreen: () -> Void
+    /// HDR 视界开关（无提供方时为空操作，按钮也不显示）。
+    var onToggleHDR: () -> Void = {}
 }

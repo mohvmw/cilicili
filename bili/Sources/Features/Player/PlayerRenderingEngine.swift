@@ -473,6 +473,8 @@ protocol PlayerRenderingEngine: AnyObject, Sendable {
     func setContentOverlay(_ overlay: AnyView?)
     func setDanmakuControls(isEnabled: Bool, onToggle: (() -> Void)?, onShowSettings: (() -> Void)?)
     func setQualityControls(_ controls: PlayerQualityControls?)
+    /// HDR 视界开关：对当前项立即应用/清除视频滤镜（新视频装载时按存储设置重新应用）。
+    func setHDRVisionEnabled(_ enabled: Bool)
     func attachNativePlaybackController(_ controller: AVPlayerViewController)
     func detachNativePlaybackController(_ controller: AVPlayerViewController)
     func prepare(source: PlayerStreamSource) async throws
@@ -584,6 +586,8 @@ extension PlayerRenderingEngine {
     func setDanmakuControls(isEnabled _: Bool, onToggle _: (() -> Void)?, onShowSettings _: (() -> Void)?) {}
 
     func setQualityControls(_: PlayerQualityControls?) {}
+
+    func setHDRVisionEnabled(_: Bool) {}
 
     func setTemporaryPlaybackRate(_ rate: Double) {
         setPlaybackRate(rate)

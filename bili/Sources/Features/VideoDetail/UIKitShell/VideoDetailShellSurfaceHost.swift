@@ -1124,6 +1124,12 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
             isDanmakuEnabled: keepsChromeMounted && overlaySnapshot.isDanmakuEnabled && !isAudioOnlyPlayback,
             onToggleDanmaku: isAudioOnlyPlayback ? nil : onToggleDanmaku,
             onShowDanmakuSettings: isAudioOnlyPlayback ? nil : onShowDanmakuSettings,
+            isHDREnabled: keepsChromeMounted && libraryStore.hdrVisionSettings.enabled && !isAudioOnlyPlayback,
+            onToggleHDR: isAudioOnlyPlayback ? nil : { [libraryStore, viewModel] in
+                let enabled = !libraryStore.hdrVisionSettings.enabled
+                libraryStore.setHDRVisionEnabled(enabled)
+                viewModel.setHDRVisionEnabled(enabled)
+            },
             isSecondaryControlsPresented: keepsChromeMounted
                 && (isMoreControlsPresented
                     || portraitMoreControlsRequestID != nil

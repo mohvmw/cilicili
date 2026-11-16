@@ -56,6 +56,8 @@ struct RootMineNavigationDestination: View {
             MineHomeAndSearchSettingsView(libraryStore: libraryStore)
         case .playbackSettings:
             MinePlaybackSettingsView(libraryStore: libraryStore, api: api)
+        case .hdrVisionSettings:
+            HDRVisionSettingsView(libraryStore: libraryStore)
         case .cacheSettings:
             ResourceCacheManagementView(mode: .user)
         case .developerDiagnostics:

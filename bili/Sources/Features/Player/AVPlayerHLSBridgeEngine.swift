@@ -48,6 +48,7 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
     private var lastDisplayDynamicRangePolicySummary: String?
     private var playerItem: AVPlayerItem?
     private var videoOutput: AVPlayerItemVideoOutput?
+    private var hdrVisionSettingsObserver: NSObjectProtocol?
     private var lastVideoFrameImage: UIImage?
     private var recoveryFrameCacheTask: Task<Void, Never>?
     private var source: PlayerStreamSource?
@@ -266,6 +267,13 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         nativeDolbyVideoOverlay.onReadyToPlay = { [weak self] in
             self?.handleNativeDolbyVideoOverlayReadyToPlay()
         }
+        hdrVisionSettingsObserver = NotificationCenter.default.addObserver(
+            forName: HDRVisionSettings.didChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.applyHDRVisionSettingsToCurrentItem()
+        }
         observePlayerState()
     }
 
@@ -289,6 +297,9 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         }
         if let itemAccessLogObserver {
             NotificationCenter.default.removeObserver(itemAccessLogObserver)
+        }
+        if let hdrVisionSettingsObserver {
+            NotificationCenter.default.removeObserver(hdrVisionSettingsObserver)
         }
         if let periodicTimeObserver {
             player.removeTimeObserver(periodicTimeObserver)
@@ -481,6 +492,7 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         retainedAssets = [asset]
         configureStartupBuffering(for: item, source: source)
         attachVideoOutput(to: item)
+        HDRVisionVideoFilter.apply(to: item, source: source)
         player.replaceCurrentItem(with: item)
         oldItem.asset.cancelLoading()
         player.automaticallyWaitsToMinimizeStalling = false
@@ -535,6 +547,20 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
     func setContentOverlay(_ overlay: AnyView?) {
         contentOverlay = overlay
         installContentOverlayIfPossible()
+    }
+
+    /// HDR 视界开关：对当前项立即应用或清除视频滤镜。
+    /// 新视频装载时 prepare/rebuild 会按存储的设置重新应用，恢复后不丢。
+    func setHDRVisionEnabled(_ enabled: Bool) {
+        var settings = HDRVisionSettingsBox.shared.settings
+        settings.enabled = enabled
+        HDRVisionSettingsBox.shared.update(settings)
+        applyHDRVisionSettingsToCurrentItem()
+    }
+
+    private func applyHDRVisionSettingsToCurrentItem() {
+        guard let item = playerItem, let source else { return }
+        HDRVisionVideoFilter.apply(to: item, source: source)
     }
 
     func attachNativePlaybackController(_ controller: AVPlayerViewController) {
@@ -668,6 +694,7 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         let item = prepared.item
         configureStartupBuffering(for: item, source: source)
         attachVideoOutput(to: item)
+        HDRVisionVideoFilter.apply(to: item, source: source)
         player.replaceCurrentItem(with: item)
         configureNativeDolbyVideoOverlayIfNeeded(for: source, generation: generation)
         recordPrepareStage(

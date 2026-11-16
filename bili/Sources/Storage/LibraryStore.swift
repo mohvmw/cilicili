@@ -111,6 +111,7 @@ final class LibraryStore: ObservableObject {
     @Published private(set) var videoCodecPreference: VideoCodecPreference
     @Published private(set) var forceHardwareDecodeEnabled: Bool
     @Published private(set) var dolbyVisionRenderingPolicy: DolbyVisionRenderingPolicy
+    @Published private(set) var hdrVisionSettings: HDRVisionSettings
     @Published private(set) var playbackCDNPreference: PlaybackCDNPreference
     @Published private(set) var playbackCustomCDNHost: String?
     @Published private(set) var playbackCDNProbeRefreshPolicy: PlaybackCDNProbeRefreshPolicy
@@ -553,6 +554,8 @@ final class LibraryStore: ObservableObject {
         self.videoCodecPreference = VideoCodecPreference.stored(in: userDefaults)
         self.forceHardwareDecodeEnabled = PlaybackHardwareDecodePolicy.stored(in: userDefaults)
         self.dolbyVisionRenderingPolicy = DolbyVisionRenderingPolicy.stored(in: userDefaults)
+        self.hdrVisionSettings = HDRVisionSettings.stored(in: userDefaults)
+        HDRVisionSettingsBox.shared.update(self.hdrVisionSettings)
         self.playbackCDNPreference =
             PlaybackCDNPreference(
                 rawValue: userDefaults.string(forKey: Self.playbackCDNPreferenceKey) ?? ""
@@ -896,6 +899,22 @@ final class LibraryStore: ObservableObject {
         dolbyVisionRenderingPolicy = policy
         userDefaults.set(policy.rawValue, forKey: Self.dolbyVisionRenderingPolicyKey)
         PlayerSettings.shared.reload()
+    }
+
+    /// 写入 HDR 视界设置：更新发布值、持久化、同步逐帧滤镜用的快照，
+    /// 并发通知让播放引擎对当前视频立即应用/移除滤镜。
+    func setHDRVisionSettings(_ settings: HDRVisionSettings) {
+        hdrVisionSettings = settings
+        HDRVisionSettings.store(settings, in: userDefaults)
+        HDRVisionSettingsBox.shared.update(settings)
+        NotificationCenter.default.post(name: HDRVisionSettings.didChangeNotification, object: nil)
+    }
+
+    /// 只翻总开关（播放器上的 HDR 按钮走这里）。
+    func setHDRVisionEnabled(_ isEnabled: Bool) {
+        var settings = hdrVisionSettings
+        settings.enabled = isEnabled
+        setHDRVisionSettings(settings)
     }
 
     func setHomeRecommendFeedSourcePreference(_ preference: HomeRecommendFeedSourcePreference) {

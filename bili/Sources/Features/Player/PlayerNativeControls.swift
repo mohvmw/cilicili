@@ -8,6 +8,8 @@ struct PlayerNativePlaybackControls: View {
     let isPlaying: Bool
     let isDanmakuEnabled: Bool
     let showsDanmakuButton: Bool
+    let isHDREnabled: Bool = false
+    let showsHDRButton: Bool = false
     let canToggleFullscreen: Bool
     let isFullscreenActive: Bool
     let controlsAccessory: AnyView?
@@ -40,6 +42,8 @@ struct PlayerNativePlaybackControls: View {
                     isPlaying: isPlaying,
                     isDanmakuEnabled: isDanmakuEnabled,
                     showsDanmakuButton: showsDanmakuButton,
+                    isHDREnabled: isHDREnabled,
+                    showsHDRButton: showsHDRButton,
                     canToggleFullscreen: canToggleFullscreen,
                     isFullscreenActive: isFullscreenActive,
                     controlsAccessory: controlsAccessory,

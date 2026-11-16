@@ -31,6 +31,8 @@ struct BiliPlayerViewOptions {
     let isDanmakuEnabled: Bool
     let onToggleDanmaku: (() -> Void)?
     let onShowDanmakuSettings: (() -> Void)?
+    let isHDREnabled: Bool
+    let onToggleHDR: (() -> Void)?
     let isSecondaryControlsPresented: Bool
     let durationHint: TimeInterval?
     let embeddedAspectRatio: CGFloat
@@ -66,6 +68,8 @@ struct BiliPlayerViewOptions {
         isDanmakuEnabled: Bool = true,
         onToggleDanmaku: (() -> Void)? = nil,
         onShowDanmakuSettings: (() -> Void)? = nil,
+        isHDREnabled: Bool = false,
+        onToggleHDR: (() -> Void)? = nil,
         isSecondaryControlsPresented: Bool = false,
         durationHint: TimeInterval? = nil,
         embeddedAspectRatio: CGFloat = 16 / 9,
@@ -100,6 +104,8 @@ struct BiliPlayerViewOptions {
         self.isDanmakuEnabled = isDanmakuEnabled
         self.onToggleDanmaku = onToggleDanmaku
         self.onShowDanmakuSettings = onShowDanmakuSettings
+        self.isHDREnabled = isHDREnabled
+        self.onToggleHDR = onToggleHDR
         self.isSecondaryControlsPresented = isSecondaryControlsPresented
         self.durationHint = durationHint
         self.embeddedAspectRatio = embeddedAspectRatio
@@ -137,6 +143,8 @@ struct BiliPlayerViewOptions {
             isDanmakuEnabled: isDanmakuEnabled,
             onToggleDanmaku: onToggleDanmaku,
             onShowDanmakuSettings: onShowDanmakuSettings,
+            isHDREnabled: isHDREnabled,
+            onToggleHDR: onToggleHDR,
             isSecondaryControlsPresented: isSecondaryControlsPresented,
             durationHint: durationHint,
             embeddedAspectRatio: embeddedAspectRatio,

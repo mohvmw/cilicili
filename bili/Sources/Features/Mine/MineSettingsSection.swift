@@ -17,6 +17,10 @@ struct MineSettingsSection: View {
             playbackSettingsLink
         }
 
+        Section("HDR 视界") {
+            hdrVisionSettingsLink
+        }
+
         Section("内容与隐私") {
             contentFilterSettingsLink
             privacySettingsLink
@@ -54,6 +58,16 @@ struct MineSettingsSection: View {
             subtitle: playbackSettingsSummary,
             systemImage: "play.rectangle"
         )
+    }
+
+    private var hdrVisionSettingsLink: some View {
+        settingsLink(
+            route: .hdrVisionSettings,
+            title: "HDR 视界",
+            subtitle: hdrVisionSettingsSummary,
+            systemImage: "sun.max.fill"
+        )
+        .accessibilityIdentifier("mine.settings.hdrVision")
     }
 
     private var cacheSettingsLink: some View {
@@ -162,5 +176,11 @@ struct MineSettingsSection: View {
             parts.append("硬解优先")
         }
         return parts.joined(separator: " · ")
+    }
+
+    private var hdrVisionSettingsSummary: String {
+        let settings = libraryStore.hdrVisionSettings
+        guard settings.enabled else { return "未启用" }
+        return "\(settings.mappingMode.title) · \(settings.mappingMode == .bt2446a ? settings.bt2446aPreset.title : settings.powerPreset.title)"
     }
 }

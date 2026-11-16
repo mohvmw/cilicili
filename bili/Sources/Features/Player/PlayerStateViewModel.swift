@@ -1284,6 +1284,11 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
         engine.setQualityControls(controls)
     }
 
+    func setHDRVisionEnabled(_ enabled: Bool) {
+        guard !isTerminated else { return }
+        engine.setHDRVisionEnabled(enabled)
+    }
+
     private func installPlaybackHandoffSnapshot(
         on hostView: UIView,
         fallbackView: UIView?,

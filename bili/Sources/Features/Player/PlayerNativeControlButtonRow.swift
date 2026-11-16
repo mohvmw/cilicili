@@ -7,6 +7,8 @@ struct PlayerNativeControlButtonRow: View {
     let isPlaying: Bool
     let isDanmakuEnabled: Bool
     let showsDanmakuButton: Bool
+    let isHDREnabled: Bool = false
+    let showsHDRButton: Bool = false
     let canToggleFullscreen: Bool
     let isFullscreenActive: Bool
     let controlsAccessory: AnyView?
@@ -51,6 +53,16 @@ struct PlayerNativeControlButtonRow: View {
                         .frame(height: metrics.controlHeight)
                 }
 
+                if showsHDRButton {
+                    PlayerNativeGlassIconButton(
+                        systemName: hdrControlSymbol,
+                        accessibilityLabel: "HDR 增强",
+                        accessibilityIdentifier: "ui.player.hdr.toggle",
+                        metrics: metrics,
+                        action: actions.onToggleHDR
+                    )
+                }
+
                 if showsDanmakuButton {
                     PlayerNativeGlassIconButton(
                         systemName: danmakuControlSymbol,
@@ -85,5 +97,9 @@ struct PlayerNativeControlButtonRow: View {
         layout.isLive
             ? "slider.horizontal.3"
             : (isDanmakuEnabled ? "text.bubble.fill" : "text.bubble")
+    }
+
+    private var hdrControlSymbol: String {
+        isHDREnabled ? "sun.max.fill" : "sun.max"
     }
 }
