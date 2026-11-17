@@ -62,10 +62,15 @@ enum HDRVisionVideoFilter {
     private static var _framesProcessed = 0
     private static var _framesPassedThrough = 0
 
+    /// apply 的代次：每次走到创建合成都 +1，异步回调只认最新一次，
+    /// 避免旧的创建覆盖新视频 / 新开关的状态。
+    private static var _applyGeneration = 0
+
     /// Metal 内核是否加载成功（从 default.metallib）。首次读取会触发加载。
     static var kernelCompiled: Bool { kernel != nil }
 
-    /// 最近一次 apply 的结果：未调用 / 已挂载 / 开关已关闭 / HDR 源已跳过 / 纯音频已跳过 / 内核编译失败。
+    /// 最近一次 apply 的结果：未调用 / 合成创建中… / 已挂载 / 开关已关闭 /
+    /// HDR 源已跳过 / 纯音频已跳过 / 内核未加载：… / 合成创建失败：…。
     static var lastApplyStatus: String { statusLock.withLock { _lastApplyStatus } }
 
     /// 逐帧回调里内核成功处理 / 原样直通的帧数。直通一直涨而处理帧为 0，说明每帧都没进内核。
@@ -107,43 +112,54 @@ enum HDRVisionVideoFilter {
             setLastApplyStatus("纯音频已跳过")
             return
         }
-        guard let composition = makeVideoComposition(for: item.asset, settings: settings) else {
+        guard let kernel else {
             item.videoComposition = nil
-            // 诊断：内核行显示“已加载”却走到这里时，把内核当时的真实状态写进
-            // 当前画面，避免“已加载却报编译失败”的歧义。
-            if kernel == nil {
-                setLastApplyStatus("内核未加载：\(kernelLoadError ?? "无错误信息")")
-            } else {
-                setLastApplyStatus("合成创建失败（内核已加载）")
-            }
+            setLastApplyStatus("内核未加载：\(kernelLoadError ?? "无错误信息")")
             return
         }
-        item.videoComposition = composition
-        setLastApplyStatus("已挂载")
-    }
-
-    /// 为一个素材建视频合成。renderScale 来自设置；帧间隔按素材帧率取。
-    static func makeVideoComposition(for asset: AVAsset, settings: HDRVisionSettings) -> AVMutableVideoComposition? {
-        guard let kernel else { return nil }
-        let composition = AVMutableVideoComposition(asset: asset, applyingCIFiltersWithHandler: { request in
-            let settings = HDRVisionSettingsBox.shared.settings
-            guard let output = applyKernel(kernel, to: request.sourceImage, settings: settings) else {
-                statusLock.withLock { _framesPassedThrough += 1 }
-                request.finish(with: request.sourceImage, context: nil)
-                return
+        // 同步创建接口在素材轨道尚未加载时建不出合成：prepare() 刚创建
+        // 视频项时，HLS 素材的轨道还没从网络加载下来（苹果文档要求调用前
+        // 先加载轨道/时长），所以改用 iOS 18 起的异步接口，它先加载轨道
+        // 再建合成，失败时在回调里给出错误。创建期间状态先写“合成创建中…”。
+        let generation = statusLock.withLock { _applyGeneration += 1; return _applyGeneration }
+        setLastApplyStatus("合成创建中…")
+        AVMutableVideoComposition.videoComposition(
+            with: item.asset,
+            applyingCIFiltersWithHandler: { request in
+                let settings = HDRVisionSettingsBox.shared.settings
+                guard let output = applyKernel(kernel, to: request.sourceImage, settings: settings) else {
+                    statusLock.withLock { _framesPassedThrough += 1 }
+                    request.finish(with: request.sourceImage, context: nil)
+                    return
+                }
+                statusLock.withLock { _framesProcessed += 1 }
+                request.finish(with: output, context: nil)
+            },
+            completionHandler: { [weak item] composition, error in
+                DispatchQueue.main.async {
+                    guard let item else { return }
+                    // 已被更新的 apply 取代，或用户中途关了开关，就不再挂这个合成。
+                    let isLatest = statusLock.withLock { _applyGeneration } == generation
+                    guard isLatest, HDRVisionSettingsBox.shared.settings.enabled else { return }
+                    guard let composition else {
+                        setLastApplyStatus("合成创建失败：\(error?.localizedDescription ?? "未知错误")")
+                        return
+                    }
+                    // 回调时轨道已加载好，帧率能读到，帧间隔才设得上。
+                    let currentSettings = HDRVisionSettingsBox.shared.settings
+                    composition.renderScale = Float(currentSettings.renderScale)
+                    if let track = item.asset.tracks(withMediaType: .video).first,
+                       track.nominalFrameRate > 0 {
+                        composition.frameDuration = CMTime(
+                            seconds: 1.0 / Double(track.nominalFrameRate),
+                            preferredTimescale: 600
+                        )
+                    }
+                    item.videoComposition = composition
+                    setLastApplyStatus("已挂载")
+                }
             }
-            statusLock.withLock { _framesProcessed += 1 }
-            request.finish(with: output, context: nil)
-        })
-        composition.renderScale = Float(settings.renderScale)
-        if let track = asset.tracks(withMediaType: .video).first,
-           track.nominalFrameRate > 0 {
-            composition.frameDuration = CMTime(
-                seconds: 1.0 / Double(track.nominalFrameRate),
-                preferredTimescale: 600
-            )
-        }
-        return composition
+        )
     }
 
     // MARK: - 逐帧应用
