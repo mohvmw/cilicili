@@ -70,13 +70,15 @@ enum HDRVisionVideoFilter {
     private static var _framesPassedThrough = 0
     /// 最近一次建的指令实际要用的轨道 ID（从指令的 requiredSourceTrackIDs 读回）。
     /// 若这里是空的，说明 Configuration 没把层指令的轨道带进指令，合成器自然收不到帧。
-    private static var _lastInstructionRequiredTrackIDs: [NSNumber] = []
+    /// 注意：iOS 26 上 requiredSourceTrackIDs 是 [NSValue]（不是 [NSNumber]），
+    /// 每个 NSValue 包着一个 CMPersistentTrackID（Int32），用 getValue 取出来。
+    private static var _lastInstructionRequiredTrackIDs: [CMPersistentTrackID] = []
     /// 合成器是否拿到过渲染上下文（AVFoundation 实例化合成器并调用
     /// renderContextChanged 后为 true）。若一直 false，说明合成器根本没被建出来。
     private static var _compositorRenderContextReceived = false
 
     /// 最近一次建的指令实际要用的轨道 ID。
-    static var lastInstructionRequiredTrackIDs: [NSNumber] {
+    static var lastInstructionRequiredTrackIDs: [CMPersistentTrackID] {
         statusLock.withLock { _lastInstructionRequiredTrackIDs }
     }
 
@@ -225,7 +227,14 @@ enum HDRVisionVideoFilter {
         item.videoComposition = composition
         // 把指令实际要用的轨道 ID 读回来记下：若 Configuration 没把层指令的
         // 轨道带进指令，这里就是空的，合成器收不到帧的原因就找到了。
-        statusLock.withLock { _lastInstructionRequiredTrackIDs = instruction.requiredSourceTrackIDs ?? [] }
+        // iOS 26 上 requiredSourceTrackIDs 是 [NSValue]，每个值包着一个
+        // CMPersistentTrackID（Int32），用 getValue 取出来。
+        let requiredTrackIDs = (instruction.requiredSourceTrackIDs ?? []).map { value -> CMPersistentTrackID in
+            var trackID: CMPersistentTrackID = 0
+            value.getValue(&trackID)
+            return trackID
+        }
+        statusLock.withLock { _lastInstructionRequiredTrackIDs = requiredTrackIDs }
         setLastApplyStatus("已挂载（\(trackSource)）")
     }
 

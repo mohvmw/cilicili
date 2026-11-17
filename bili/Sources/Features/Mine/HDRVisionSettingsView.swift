@@ -37,7 +37,7 @@ struct HDRVisionSettingsView: View {
                 HStack {
                     Text("指令需轨道")
                     Spacer()
-                    Text(HDRVisionVideoFilter.lastInstructionRequiredTrackIDs.isEmpty ? "无" : "[\(HDRVisionVideoFilter.lastInstructionRequiredTrackIDs.map { $0.stringValue }.joined(separator: ", "))]")
+                    Text(HDRVisionVideoFilter.lastInstructionRequiredTrackIDs.isEmpty ? "无" : "[\(HDRVisionVideoFilter.lastInstructionRequiredTrackIDs.map(String.init).joined(separator: ", "))]")
                         .foregroundStyle(.secondary)
                 }
                 HStack {
