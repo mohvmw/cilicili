@@ -23,6 +23,11 @@ struct HDRVisionSettingsView: View {
                     Text(HDRVisionVideoFilter.kernelCompiled ? "已加载" : "编译失败")
                         .foregroundStyle(HDRVisionVideoFilter.kernelCompiled ? Color.secondary : Color.red)
                 }
+                if let kernelError = HDRVisionVideoFilter.kernelLoadError {
+                    Text(kernelError)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
                 HStack {
                     Text("当前画面")
                     Spacer()
