@@ -161,7 +161,7 @@ enum HDRVisionVideoFilter {
 // MARK: - Metal 内核源码（WGSL → MSL 逐句移植）
 //
 // 入口函数按 Core Image Metal 内核的约定：extern "C"，首参 sample_t，
-// 末参 destination（dest.coord 为目标像素坐标）；邻域采样用
+// 末参 destination（dest.coord() 为目标像素坐标）；邻域采样用
 // samplerTransform 把目标坐标换算为采样坐标，与脚本的 texel 偏移等价
 // （偏移单位是目标像素，即脚本缩放后画布的像素）。
 
@@ -169,6 +169,7 @@ private let kernelSource = #"""
 #include <metal_stdlib>
 #include <CoreImage/CoreImage.h>
 using namespace metal;
+using namespace coreimage;
 
 float luminance_hdv(float3 c) {
     return dot(c, float3(0.2126, 0.7152, 0.0722));
@@ -487,7 +488,7 @@ extern "C" float4 hdrVisionKernel(
     float sharpenStrength,
     destination dest
 ) {
-    float2 dc = dest.coord;
+    float2 dc = dest.coord();
     float3 color = s.rgb;
 
     if (debandEnabled > 0.5) {
