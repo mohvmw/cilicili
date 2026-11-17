@@ -17,6 +17,32 @@ struct HDRVisionSettingsView: View {
     var body: some View {
         List {
             Section {
+                HStack {
+                    Text("Metal 内核")
+                    Spacer()
+                    Text(HDRVisionVideoFilter.kernelCompiled ? "已加载" : "编译失败")
+                        .foregroundStyle(HDRVisionVideoFilter.kernelCompiled ? .secondary : .red)
+                }
+                HStack {
+                    Text("当前画面")
+                    Spacer()
+                    Text(HDRVisionVideoFilter.lastApplyStatus)
+                        .foregroundStyle(.secondary)
+                }
+                HStack {
+                    Text("已处理帧 / 直通帧")
+                    Spacer()
+                    Text("\(HDRVisionVideoFilter.frameCounts.processed) / \(HDRVisionVideoFilter.frameCounts.passedThrough)")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+            } header: {
+                Text("状态（诊断）")
+            } footer: {
+                Text("内核编译失败，或直通帧一直涨而处理帧为 0，都说明滤镜没生效。打开本页时刷新；开关一次或重新进入可更新。")
+            }
+
+            Section {
                 Toggle("启用 HDR 增强", isOn: boolBinding(\.enabled))
             } footer: {
                 Text("仅对 SDR 视频生效；HDR10 / 杜比视界源视频会自动跳过（与脚本一致）。播放器底部也有 HDR 按钮，开关立即生效。")

@@ -26,21 +26,56 @@ enum HDRVisionVideoFilter {
         return kernel
     }()
 
+    // MARK: - 诊断状态（设置页读取）
+
+    private static let statusLock = NSLock()
+    private static var _lastApplyStatus = "未调用"
+    private static var _framesProcessed = 0
+    private static var _framesPassedThrough = 0
+
+    /// Metal 内核是否编译成功。首次读取会触发编译。
+    static var kernelCompiled: Bool { kernel != nil }
+
+    /// 最近一次 apply 的结果：未调用 / 已挂载 / 开关已关闭 / HDR 源已跳过 / 纯音频已跳过 / 内核编译失败。
+    static var lastApplyStatus: String { statusLock.withLock { _lastApplyStatus } }
+
+    /// 逐帧回调里内核成功处理 / 原样直通的帧数。直通一直涨而处理帧为 0，说明每帧都没进内核。
+    static var frameCounts: (processed: Int, passedThrough: Int) {
+        statusLock.withLock { (_framesProcessed, _framesPassedThrough) }
+    }
+
+    private static func setLastApplyStatus(_ status: String) {
+        statusLock.withLock { _lastApplyStatus = status }
+    }
+
     /// 给新装载的视频项应用或清除滤镜。
     ///
     /// 只处理 SDR 源：脚本同样跳过 PQ/HLG 的 HDR 源（`source_hdr` 状态）。
     /// 音频-only 的项没有视频轨，不处理。开关关闭时清除已挂的合成。
     static func apply(to item: AVPlayerItem, source: PlayerStreamSource) {
         let settings = HDRVisionSettingsBox.shared.settings
-        guard settings.enabled,
-              !source.dynamicRange.isHDR,
-              source.playbackContentMode != .audioOnly,
-              let composition = makeVideoComposition(for: item.asset, settings: settings)
-        else {
+        guard settings.enabled else {
             item.videoComposition = nil
+            setLastApplyStatus("开关已关闭")
+            return
+        }
+        guard !source.dynamicRange.isHDR else {
+            item.videoComposition = nil
+            setLastApplyStatus("HDR 源已跳过")
+            return
+        }
+        guard source.playbackContentMode != .audioOnly else {
+            item.videoComposition = nil
+            setLastApplyStatus("纯音频已跳过")
+            return
+        }
+        guard let composition = makeVideoComposition(for: item.asset, settings: settings) else {
+            item.videoComposition = nil
+            setLastApplyStatus("内核编译失败")
             return
         }
         item.videoComposition = composition
+        setLastApplyStatus("已挂载")
     }
 
     /// 为一个素材建视频合成。renderScale 来自设置；帧间隔按素材帧率取。
@@ -49,9 +84,11 @@ enum HDRVisionVideoFilter {
         let composition = AVMutableVideoComposition(asset: asset, applyingCIFiltersWithHandler: { request in
             let settings = HDRVisionSettingsBox.shared.settings
             guard let output = applyKernel(kernel, to: request.sourceImage, settings: settings) else {
+                statusLock.withLock { _framesPassedThrough += 1 }
                 request.finish(with: request.sourceImage, context: nil)
                 return
             }
+            statusLock.withLock { _framesProcessed += 1 }
             request.finish(with: output, context: nil)
         })
         composition.renderScale = Float(settings.renderScale)
