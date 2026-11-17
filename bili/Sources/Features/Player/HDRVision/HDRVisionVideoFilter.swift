@@ -78,7 +78,10 @@ enum HDRVisionVideoFilter {
     /// 引擎在 item ready 后用它决定是否重试。
     static var lastApplyFailed: Bool {
         statusLock.withLock {
-            _lastApplyStatus.hasPrefix("合成创建失败") || _lastApplyStatus.hasPrefix("内核未加载")
+            _lastApplyStatus.hasPrefix("合成创建失败")
+                || _lastApplyStatus.hasPrefix("内核未加载")
+                || _lastApplyStatus.hasPrefix("无视频轨")
+                || _lastApplyStatus.hasPrefix("加载轨道失败")
         }
     }
 
@@ -135,12 +138,17 @@ enum HDRVisionVideoFilter {
         setLastApplyStatus("加载轨道中…")
         Task { [weak item] in
             do {
-                let (tracks, _) = try await asset.load(.tracks, .duration)
+                let (tracks, duration) = try await asset.load(.tracks, .duration)
                 let videoTracks = tracks.filter { $0.mediaType == .video }
                 guard !videoTracks.isEmpty else {
                     let isLatest = statusLock.withLock { _applyGeneration } == generation
                     guard isLatest else { return }
-                    setLastApplyStatus("无视频轨（已加载轨道\(tracks.count)条）")
+                    // 时长能区分两种情况：时长正常说明播放列表已解析但轨道仍
+                    // 拿不到，时长未知说明连播放列表都没解析出来。
+                    let durationSeconds = CMTimeGetSeconds(duration)
+                    let durationText = durationSeconds.isFinite && durationSeconds > 0
+                        ? "时长\(Int(durationSeconds))秒" : "时长未知"
+                    setLastApplyStatus("无视频轨（已加载轨道\(tracks.count)条/\(durationText)）")
                     return
                 }
                 AVMutableVideoComposition.videoComposition(
