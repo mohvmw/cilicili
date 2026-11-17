@@ -69,9 +69,9 @@ enum HDRVisionVideoFilter {
     /// Metal 内核是否加载成功（从 default.metallib）。首次读取会触发加载。
     static var kernelCompiled: Bool { kernel != nil }
 
-    /// 最近一次 apply 的结果：未调用 / 加载轨道中… / 合成创建中… / 已挂载 /
-    /// 开关已关闭 / HDR 源已跳过 / 纯音频已跳过 / 内核未加载：… /
-    /// 无视频轨（…） / 加载轨道失败：… / 合成创建失败：…。
+    /// 最近一次 apply 的结果：未调用 / 加载轨道中… / 已挂载 /
+    /// 已挂载（新素材） / 开关已关闭 / HDR 源已跳过 / 纯音频已跳过 /
+    /// 内核未加载：… / 无视频轨（…） / 加载轨道失败：… / 合成创建失败：…。
     static var lastApplyStatus: String { statusLock.withLock { _lastApplyStatus } }
 
     /// 上次创建是否失败（可重试）。开关关闭 / 已挂载 / 创建中都不算失败。
@@ -139,7 +139,29 @@ enum HDRVisionVideoFilter {
         Task { [weak item] in
             do {
                 let (tracks, duration) = try await asset.load(.tracks, .duration)
-                let videoTracks = tracks.filter { $0.mediaType == .video }
+                var videoTracks = tracks.filter { $0.mediaType == .video }
+                // 用来建合成的素材，默认就是视频项自己的素材。
+                var compositionAsset = asset
+                // 视频项自己的素材可能缓存了 0 条轨道（prepare 时加载过一
+                // 次，结果被缓存）。若它报 0 条，就用同 URL 新建一个素材再
+                // 加载一次：新素材没有缓存，会重新解析播放列表。若新素材拿
+                // 到视频轨，就用它建合成（同一播放列表，轨道 ID 相同，能挂
+                // 到当前视频项上）。
+                var freshTried = false
+                if videoTracks.isEmpty, let urlAsset = asset as? AVURLAsset {
+                    freshTried = true
+                    do {
+                        let freshAsset = AVURLAsset(url: urlAsset.url)
+                        let (freshTracks, _) = try await freshAsset.load(.tracks, .duration)
+                        let freshVideoTracks = freshTracks.filter { $0.mediaType == .video }
+                        if !freshVideoTracks.isEmpty {
+                            videoTracks = freshVideoTracks
+                            compositionAsset = freshAsset
+                        }
+                    } catch {
+                        // 新素材加载失败不覆盖原结果，继续按 0 轨道处理。
+                    }
+                }
                 guard !videoTracks.isEmpty else {
                     let isLatest = statusLock.withLock { _applyGeneration } == generation
                     guard isLatest else { return }
@@ -148,11 +170,15 @@ enum HDRVisionVideoFilter {
                     let durationSeconds = CMTimeGetSeconds(duration)
                     let durationText = durationSeconds.isFinite && durationSeconds > 0
                         ? "时长\(Int(durationSeconds))秒" : "时长未知"
-                    setLastApplyStatus("无视频轨（已加载轨道\(tracks.count)条/\(durationText)）")
+                    let trackText = freshTried ? "新素材也 0 条" : "已加载轨道\(tracks.count)条"
+                    setLastApplyStatus("无视频轨（\(trackText)/\(durationText)）")
                     return
                 }
+                // 帧率从拿到的视频轨上读，避免回调里再读轨道（原素材读不到）。
+                let frameRate = videoTracks.first?.nominalFrameRate ?? 0
+                let usedFreshAsset = compositionAsset !== asset
                 AVMutableVideoComposition.videoComposition(
-                    with: asset,
+                    with: compositionAsset,
                     applyingCIFiltersWithHandler: { request in
                         let settings = HDRVisionSettingsBox.shared.settings
                         guard let output = applyKernel(kernel, to: request.sourceImage, settings: settings) else {
@@ -176,18 +202,16 @@ enum HDRVisionVideoFilter {
                                 setLastApplyStatus("合成创建失败：\(error?.localizedDescription ?? "未知错误")（\(trackInfo)）")
                                 return
                             }
-                            // 回调时轨道已加载好，帧率能读到，帧间隔才设得上。
                             let currentSettings = HDRVisionSettingsBox.shared.settings
                             composition.renderScale = Float(currentSettings.renderScale)
-                            if let track = item.asset.tracks(withMediaType: .video).first,
-                               track.nominalFrameRate > 0 {
+                            if frameRate > 0 {
                                 composition.frameDuration = CMTime(
-                                    seconds: 1.0 / Double(track.nominalFrameRate),
+                                    seconds: 1.0 / Double(frameRate),
                                     preferredTimescale: 600
                                 )
                             }
                             item.videoComposition = composition
-                            setLastApplyStatus("已挂载")
+                            setLastApplyStatus(usedFreshAsset ? "已挂载（新素材）" : "已挂载")
                         }
                     }
                 )
