@@ -21,7 +21,7 @@ struct HDRVisionSettingsView: View {
                     Text("Metal 内核")
                     Spacer()
                     Text(HDRVisionVideoFilter.kernelCompiled ? "已加载" : "编译失败")
-                        .foregroundStyle(HDRVisionVideoFilter.kernelCompiled ? .secondary : .red)
+                        .foregroundStyle(HDRVisionVideoFilter.kernelCompiled ? Color.secondary : Color.red)
                 }
                 HStack {
                     Text("当前画面")
