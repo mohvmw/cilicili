@@ -2,6 +2,7 @@ import AVFoundation
 import CoreImage
 import CoreMedia
 import Foundation
+import os
 
 /// HDR 视界视频滤镜。
 ///

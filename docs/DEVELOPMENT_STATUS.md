@@ -1618,3 +1618,10 @@
   2. 模拟器回归：指定 iPhone 18 Pro Max / iOS 27.0，跑相关单元与播放器 UI（按钮出现/切换、设置页持久化、模式切换后滑杆上限变化）。
   3. 真机验收（RCe2027）：SDR 视频点 HDR 按钮确认画面可见变化且开关即时生效；HDR10/DV 视频确认原生 HDR 不变、滤镜开/关无影响；画质切换/自动恢复后滤镜仍在；去色带开启时 1080p 发热/掉帧情况，卡顿则调低渲染缩放。
   4. 版本递增与提交备份待用户决定（本轮未动版本号，未提交）。
+- 构建失败与修复（2026-11-17，GitHub Actions，分支 `hdr-vision` / 提交 `b96d6f7`）：
+  - 首次构建（运行 43932410461）：任务排队约 15 分钟后被取消，GitHub 未分配到 macOS runner（"not acquired by Runner of type hosted" + 一次内部服务器错误；页面提示 macOS arm64 runner 容量受限），xcodebuild 一次都没执行；`ios-release-log` 不存在。
+  - 用户重跑（07:51）：拿到 runner 并真正开始编译，`Build Release app without signing` 步骤失败（exit code 1），`ios-release-log`（55.1 KB）产生；无 IPA。
+  - 失败原因（3 个编译错误，均在 HDR 改动内）：
+    1. `HDRVisionVideoFilter.swift:23`：`PlayerMetricsLog.logger.error` 需要 `import os`（`os.Logger` 的方法），文件漏了 import——已补 `import os`。
+    2. `BiliPlayerNativeControlsHost.swift:12` 与 `PlayerNativeControls.swift:38`：调用方传 `isHDREnabled`/`showsHDRButton`，但 Swift 自动合成的 memberwise init 不包含 `let` 带默认值的属性（`var` 带默认值会包含——`PlayerNativePlaybackControlsActions.onToggleHDR` 同样传参却能编过），所以报 extra arguments——已在 `PlayerNativePlaybackControls` 与 `PlayerNativeControlButtonRow` 内各加显式 init（HDR 参数默认 false）。
+  - 修复已推到 `mohvmw/cilicili` 的 `hdr-vision` 分支（3 个文件），待用户重新触发构建；本地无 Swift 工具链，仍未在本地编译验证。
