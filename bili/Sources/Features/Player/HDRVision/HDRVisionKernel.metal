@@ -172,16 +172,16 @@ struct RingResult_hdv {
     float variance;
 };
 
-RingResult_hdv sampleRing_hdv(sample_t s, float2 dc, float radius) {
+RingResult_hdv sampleRing_hdv(coreimage::sampler_h s, float2 dc, float radius) {
     float2 t = float2(radius, radius);
-    float3 s0 = sample(s, samplerTransform(s, dc + float2(t.x, 0.0))).rgb;
-    float3 s1 = sample(s, samplerTransform(s, dc - float2(t.x, 0.0))).rgb;
-    float3 s2 = sample(s, samplerTransform(s, dc + float2(0.0, t.y))).rgb;
-    float3 s3 = sample(s, samplerTransform(s, dc - float2(0.0, t.y))).rgb;
-    float3 s4 = sample(s, samplerTransform(s, dc + t)).rgb;
-    float3 s5 = sample(s, samplerTransform(s, dc - t)).rgb;
-    float3 s6 = sample(s, samplerTransform(s, dc + float2(t.x, -t.y))).rgb;
-    float3 s7 = sample(s, samplerTransform(s, dc + float2(-t.x, t.y))).rgb;
+    float3 s0 = s.sample(dc + float2(t.x, 0.0)).rgb;
+    float3 s1 = s.sample(dc - float2(t.x, 0.0)).rgb;
+    float3 s2 = s.sample(dc + float2(0.0, t.y)).rgb;
+    float3 s3 = s.sample(dc - float2(0.0, t.y)).rgb;
+    float3 s4 = s.sample(dc + t).rgb;
+    float3 s5 = s.sample(dc - t).rgb;
+    float3 s6 = s.sample(dc + float2(t.x, -t.y)).rgb;
+    float3 s7 = s.sample(dc + float2(-t.x, t.y)).rgb;
 
     float3 avg = (s0 + s1 + s2 + s3 + s4 + s5 + s6 + s7) * 0.125;
 
@@ -201,7 +201,7 @@ RingResult_hdv sampleRing_hdv(sample_t s, float2 dc, float radius) {
     return r;
 }
 
-float3 applyDeband_hdv(sample_t s, float2 dc, float3 centerColor, float threshold) {
+float3 applyDeband_hdv(coreimage::sampler_h s, float2 dc, float3 centerColor, float threshold) {
     RingResult_hdv r3 = sampleRing_hdv(s, dc, 3.0);
     RingResult_hdv r8 = sampleRing_hdv(s, dc, 8.0);
     RingResult_hdv r12 = sampleRing_hdv(s, dc, 12.0);
@@ -221,31 +221,31 @@ float3 applyDeband_hdv(sample_t s, float2 dc, float3 centerColor, float threshol
     return mix(centerColor, smoothValue, strength);
 }
 
-float3 applyCAS_hdv(sample_t s, float2 dc, float3 centerRGB, float strength) {
+float3 applyCAS_hdv(coreimage::sampler_h s, float2 dc, float3 centerRGB, float strength) {
     if (strength < 0.01) {
         return centerRGB;
     }
 
-    float3 cN = sample(s, samplerTransform(s, dc + float2(0.0, -1.0))).rgb;
-    float3 cS = sample(s, samplerTransform(s, dc + float2(0.0, 1.0))).rgb;
-    float3 cE = sample(s, samplerTransform(s, dc + float2(1.0, 0.0))).rgb;
-    float3 cW = sample(s, samplerTransform(s, dc + float2(-1.0, 0.0))).rgb;
-    float3 cNE = sample(s, samplerTransform(s, dc + float2(1.0, -1.0))).rgb;
-    float3 cNW = sample(s, samplerTransform(s, dc + float2(-1.0, -1.0))).rgb;
-    float3 cSE = sample(s, samplerTransform(s, dc + float2(1.0, 1.0))).rgb;
-    float3 cSW = sample(s, samplerTransform(s, dc + float2(-1.0, 1.0))).rgb;
+    float3 cN = s.sample(dc + float2(0.0, -1.0)).rgb;
+    float3 cS = s.sample(dc + float2(0.0, 1.0)).rgb;
+    float3 cE = s.sample(dc + float2(1.0, 0.0)).rgb;
+    float3 cW = s.sample(dc + float2(-1.0, 0.0)).rgb;
+    float3 cNE = s.sample(dc + float2(1.0, -1.0)).rgb;
+    float3 cNW = s.sample(dc + float2(-1.0, -1.0)).rgb;
+    float3 cSE = s.sample(dc + float2(1.0, 1.0)).rgb;
+    float3 cSW = s.sample(dc + float2(-1.0, 1.0)).rgb;
 
     float2 t16 = float2(16.0, 16.0);
-    float3 fN16 = sample(s, samplerTransform(s, dc + float2(0.0, -t16.y))).rgb;
-    float3 fS16 = sample(s, samplerTransform(s, dc + float2(0.0, t16.y))).rgb;
-    float3 fE16 = sample(s, samplerTransform(s, dc + float2(t16.x, 0.0))).rgb;
-    float3 fW16 = sample(s, samplerTransform(s, dc + float2(-t16.x, 0.0))).rgb;
+    float3 fN16 = s.sample(dc + float2(0.0, -t16.y)).rgb;
+    float3 fS16 = s.sample(dc + float2(0.0, t16.y)).rgb;
+    float3 fE16 = s.sample(dc + float2(t16.x, 0.0)).rgb;
+    float3 fW16 = s.sample(dc + float2(-t16.x, 0.0)).rgb;
 
     float2 t32 = float2(32.0, 32.0);
-    float3 fN32 = sample(s, samplerTransform(s, dc + float2(0.0, -t32.y))).rgb;
-    float3 fS32 = sample(s, samplerTransform(s, dc + float2(0.0, t32.y))).rgb;
-    float3 fE32 = sample(s, samplerTransform(s, dc + float2(t32.x, 0.0))).rgb;
-    float3 fW32 = sample(s, samplerTransform(s, dc + float2(-t32.x, 0.0))).rgb;
+    float3 fN32 = s.sample(dc + float2(0.0, -t32.y)).rgb;
+    float3 fS32 = s.sample(dc + float2(0.0, t32.y)).rgb;
+    float3 fE32 = s.sample(dc + float2(t32.x, 0.0)).rgb;
+    float3 fW32 = s.sample(dc + float2(-t32.x, 0.0)).rgb;
 
     float3 lumaW = float3(0.2126, 0.7152, 0.0722);
     float centerLuma = dot(centerRGB, lumaW);
@@ -299,7 +299,7 @@ float3 applyCAS_hdv(sample_t s, float2 dc, float3 centerRGB, float strength) {
 }
 
 [[stitchable]] float4 hdrVisionKernel(
-    sample_t s,
+    coreimage::sampler_h s,
     float exposureMultiplier,
     float saturation,
     float skipSaturation,
@@ -318,11 +318,10 @@ float3 applyCAS_hdv(sample_t s, float2 dc, float3 centerRGB, float strength) {
     float debandEnabled,
     float debandThreshold,
     float sharpenEnabled,
-    float sharpenStrength,
-    destination dest
+    float sharpenStrength
 ) {
-    float2 dc = dest.coord();
-    float3 color = s.rgb;
+    float2 dc = s.coord();
+    float3 color = s.sample(dc).rgb;
 
     if (debandEnabled > 0.5) {
         color = applyDeband_hdv(s, dc, color, debandThreshold);

@@ -20,14 +20,20 @@ enum HDRVisionVideoFilter {
 
     /// 从构建期编译好的 `default.metallib` 加载 stitchable 内核。
     ///
-    /// 内核源码在同目录的 `HDRVisionKernel.metal`（`[[stitchable]]`，首参
-    /// `sample_t`、末参 `destination` 的颜色内核形式），Xcode 在构建时把它
-    /// 编进 `default.metallib`；工程需在 Metal 链接参数里加
-    /// `-framework CoreImage`（见 project.pbxproj 的 MTLLINKER_FLAGS），
-    /// 否则链接器找不到 Core Image 的 Metal 符号。
+    /// 内核源码在同目录的 `HDRVisionKernel.metal`。注意它必须是**通用内核**
+    ///（`CIKernel`，首参 `coreimage::sampler_h`）：stitchable 形式下颜色内核
+    /// 的首参只能是单个像素值（`sample_t`/`sample_h`），无法采样邻域；而
+    /// deband/CAS 必须采邻域。构建日志已证实：`sample()`/`samplerTransform()`
+    /// 这两个自由函数只接受 `sampler`（`sample_t` 传进去编译不过），所以
+    /// `sample_t` + `destination` 的颜色内核写法走不通。通用内核用
+    /// `apply(extent:roiCallback:arguments:)`，ROI 回调把输入区域向外扩 32px
+    ///（deband/CAS 最远采 32px），输入先 `clampedToExtent()`，边缘才不会变黑。
+    /// 工程需在 Metal 链接参数里加 `-framework CoreImage`
+    ///（见 project.pbxproj 的 MTLLINKER_FLAGS），否则链接器找不到
+    /// Core Image 的 Metal 符号。
     /// 运行时编译（`kernels(withMetalString:)`）在真机上以 CIKernel error 13
     /// 失败且无详细信息，改走构建期编译后，Metal 源码错误会直接出现在构建日志里。
-    private static let kernel: CIColorKernel? = {
+    private static let kernel: CIKernel? = {
         guard let url = Bundle.main.url(forResource: "default", withExtension: "metallib") else {
             setKernelLoadError("未找到 default.metallib（Metal 库未打包）")
             PlayerMetricsLog.logger.error("hdrVisionKernel load failed: default.metallib not found")
@@ -38,8 +44,8 @@ enum HDRVisionVideoFilter {
             PlayerMetricsLog.logger.error("hdrVisionKernel load failed: cannot read default.metallib")
             return nil
         }
-        guard let kernel = CIColorKernel(functionName: "hdrVisionKernel", fromMetalLibraryData: data) else {
-            setKernelLoadError("default.metallib 中未找到 hdrVisionKernel（或不是颜色内核）")
+        guard let kernel = CIKernel(functionName: "hdrVisionKernel", fromMetalLibraryData: data) else {
+            setKernelLoadError("default.metallib 中未找到 hdrVisionKernel（或不是通用内核）")
             PlayerMetricsLog.logger.error("hdrVisionKernel load failed: function not found in default.metallib")
             return nil
         }
@@ -134,7 +140,7 @@ enum HDRVisionVideoFilter {
     // MARK: - 逐帧应用
 
     private static func applyKernel(
-        _ kernel: CIColorKernel,
+        _ kernel: CIKernel,
         to image: CIImage,
         settings: HDRVisionSettings
     ) -> CIImage? {
