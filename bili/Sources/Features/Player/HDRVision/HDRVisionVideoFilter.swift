@@ -44,12 +44,15 @@ enum HDRVisionVideoFilter {
             PlayerMetricsLog.logger.error("hdrVisionKernel load failed: cannot read default.metallib")
             return nil
         }
-        guard let kernel = CIKernel(functionName: "hdrVisionKernel", fromMetalLibraryData: data) else {
-            setKernelLoadError("default.metallib 中未找到 hdrVisionKernel（或不是通用内核）")
-            PlayerMetricsLog.logger.error("hdrVisionKernel load failed: function not found in default.metallib")
+        do {
+            return try CIKernel(functionName: "hdrVisionKernel", fromMetalLibraryData: data)
+        } catch {
+            // 注意：基类 CIKernel 的这个构造器是 throwing 且非 failable，
+            // 与 CIColorKernel 的 failable 构造器不同，不能用 guard let。
+            setKernelLoadError("加载 hdrVisionKernel 失败：\(error.localizedDescription)")
+            PlayerMetricsLog.logger.error("hdrVisionKernel load failed: \(error.localizedDescription)")
             return nil
         }
-        return kernel
     }()
 
     // MARK: - 诊断状态（设置页读取）
