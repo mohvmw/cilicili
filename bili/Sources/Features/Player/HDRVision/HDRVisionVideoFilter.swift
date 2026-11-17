@@ -69,8 +69,9 @@ enum HDRVisionVideoFilter {
     /// Metal 内核是否加载成功（从 default.metallib）。首次读取会触发加载。
     static var kernelCompiled: Bool { kernel != nil }
 
-    /// 最近一次 apply 的结果：未调用 / 合成创建中… / 已挂载 / 开关已关闭 /
-    /// HDR 源已跳过 / 纯音频已跳过 / 内核未加载：… / 合成创建失败：…。
+    /// 最近一次 apply 的结果：未调用 / 加载轨道中… / 合成创建中… / 已挂载 /
+    /// 开关已关闭 / HDR 源已跳过 / 纯音频已跳过 / 内核未加载：… /
+    /// 无视频轨（…） / 加载轨道失败：… / 合成创建失败：…。
     static var lastApplyStatus: String { statusLock.withLock { _lastApplyStatus } }
 
     /// 上次创建是否失败（可重试）。开关关闭 / 已挂载 / 创建中都不算失败。
@@ -125,53 +126,69 @@ enum HDRVisionVideoFilter {
             setLastApplyStatus("内核未加载：\(kernelLoadError ?? "无错误信息")")
             return
         }
-        // 同步创建接口在素材轨道尚未加载时建不出合成：prepare() 刚创建
-        // 视频项时，HLS 素材的轨道还没从网络加载下来（苹果文档要求调用前
-        // 先加载轨道/时长），所以改用 iOS 18 起的异步接口，它先加载轨道
-        // 再建合成，失败时在回调里给出错误。创建期间状态先写“合成创建中…”。
+        // 关键：HLS 主播放列表的轨道不会随播放自动填充 .tracks——播放器
+        // 能播，不代表 .tracks 有内容；同步/异步创建接口都因拿不到轨道而
+        // 返回 nil（上次诊断：轨道 0 条）。所以先用现代异步 API 显式加载
+        // 轨道与时长，确认有视频轨后再建合成。
         let generation = statusLock.withLock { _applyGeneration += 1; return _applyGeneration }
-        setLastApplyStatus("合成创建中…")
-        AVMutableVideoComposition.videoComposition(
-            with: item.asset,
-            applyingCIFiltersWithHandler: { request in
-                let settings = HDRVisionSettingsBox.shared.settings
-                guard let output = applyKernel(kernel, to: request.sourceImage, settings: settings) else {
-                    statusLock.withLock { _framesPassedThrough += 1 }
-                    request.finish(with: request.sourceImage, context: nil)
+        let asset = item.asset
+        setLastApplyStatus("加载轨道中…")
+        Task { [weak item] in
+            do {
+                let (tracks, _) = try await asset.load(.tracks, .duration)
+                let videoTracks = tracks.filter { $0.mediaType == .video }
+                guard !videoTracks.isEmpty else {
+                    let isLatest = statusLock.withLock { _applyGeneration } == generation
+                    guard isLatest else { return }
+                    setLastApplyStatus("无视频轨（已加载轨道\(tracks.count)条）")
                     return
                 }
-                statusLock.withLock { _framesProcessed += 1 }
-                request.finish(with: output, context: nil)
-            },
-            completionHandler: { [weak item] composition, error in
-                DispatchQueue.main.async {
-                    guard let item else { return }
-                    // 已被更新的 apply 取代，或用户中途关了开关，就不再挂这个合成。
-                    let isLatest = statusLock.withLock { _applyGeneration } == generation
-                    guard isLatest, HDRVisionSettingsBox.shared.settings.enabled else { return }
-                    guard let composition else {
-                        // 失败时把素材轨道状态写进诊断：无视频轨说明工厂连轨道都没拿到。
-                        let tracks = item.asset.tracks
-                        let videoCount = tracks.filter { $0.mediaType == .video }.count
-                        let trackInfo = videoCount == 0 ? "无视频轨（轨道\(tracks.count)条）" : "视频轨\(videoCount)条"
-                        setLastApplyStatus("合成创建失败：\(error?.localizedDescription ?? "未知错误")（\(trackInfo)）")
-                        return
+                AVMutableVideoComposition.videoComposition(
+                    with: asset,
+                    applyingCIFiltersWithHandler: { request in
+                        let settings = HDRVisionSettingsBox.shared.settings
+                        guard let output = applyKernel(kernel, to: request.sourceImage, settings: settings) else {
+                            statusLock.withLock { _framesPassedThrough += 1 }
+                            request.finish(with: request.sourceImage, context: nil)
+                            return
+                        }
+                        statusLock.withLock { _framesProcessed += 1 }
+                        request.finish(with: output, context: nil)
+                    },
+                    completionHandler: { [weak item] composition, error in
+                        DispatchQueue.main.async {
+                            guard let item else { return }
+                            // 已被更新的 apply 取代，或用户中途关了开关，就不再挂这个合成。
+                            let isLatest = statusLock.withLock { _applyGeneration } == generation
+                            guard isLatest, HDRVisionSettingsBox.shared.settings.enabled else { return }
+                            guard let composition else {
+                                let tracks = item.asset.tracks
+                                let videoCount = tracks.filter { $0.mediaType == .video }.count
+                                let trackInfo = videoCount == 0 ? "无视频轨（轨道\(tracks.count)条）" : "视频轨\(videoCount)条"
+                                setLastApplyStatus("合成创建失败：\(error?.localizedDescription ?? "未知错误")（\(trackInfo)）")
+                                return
+                            }
+                            // 回调时轨道已加载好，帧率能读到，帧间隔才设得上。
+                            let currentSettings = HDRVisionSettingsBox.shared.settings
+                            composition.renderScale = Float(currentSettings.renderScale)
+                            if let track = item.asset.tracks(withMediaType: .video).first,
+                               track.nominalFrameRate > 0 {
+                                composition.frameDuration = CMTime(
+                                    seconds: 1.0 / Double(track.nominalFrameRate),
+                                    preferredTimescale: 600
+                                )
+                            }
+                            item.videoComposition = composition
+                            setLastApplyStatus("已挂载")
+                        }
                     }
-                    // 回调时轨道已加载好，帧率能读到，帧间隔才设得上。
-                    let currentSettings = HDRVisionSettingsBox.shared.settings
-                    composition.renderScale = Float(currentSettings.renderScale)
-                    if let track = item.asset.tracks(withMediaType: .video).first,
-                       track.nominalFrameRate > 0 {
-                        composition.frameDuration = CMTime(
-                            seconds: 1.0 / Double(track.nominalFrameRate),
-                            preferredTimescale: 600
-                        )
-                    }
-                    item.videoComposition = composition
-                    setLastApplyStatus("已挂载")
-                }
+                )
+            } catch {
+                let isLatest = statusLock.withLock { _applyGeneration } == generation
+                guard isLatest else { return }
+                setLastApplyStatus("加载轨道失败：\(error.localizedDescription)")
             }
-        )
+        }
     }
 
     // MARK: - 逐帧应用
