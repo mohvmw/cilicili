@@ -179,7 +179,7 @@ enum HDRVisionVideoFilter {
             let layerConfig = AVVideoCompositionLayerInstruction.Configuration(trackID: CMPersistentTrackID(id))
             return AVVideoCompositionLayerInstruction(configuration: layerConfig)
         }
-        let instructionConfig = AVVideoCompositionInstruction.Configuration(timeRange: timeRange)
+        var instructionConfig = AVVideoCompositionInstruction.Configuration(timeRange: timeRange)
         instructionConfig.layerInstructions = layerInstructions
         let instruction = AVVideoCompositionInstruction(configuration: instructionConfig)
         composition.instructions = [instruction]
