@@ -554,8 +554,10 @@ final class LibraryStore: ObservableObject {
         self.videoCodecPreference = VideoCodecPreference.stored(in: userDefaults)
         self.forceHardwareDecodeEnabled = PlaybackHardwareDecodePolicy.stored(in: userDefaults)
         self.dolbyVisionRenderingPolicy = DolbyVisionRenderingPolicy.stored(in: userDefaults)
-        self.hdrVisionSettings = HDRVisionSettings.stored(in: userDefaults)
-        HDRVisionSettingsBox.shared.update(self.hdrVisionSettings)
+        // 先用局部值同步快照：init 未完成前不能用 self 读属性（其余 stored 属性尚未初始化）。
+        let storedHDRVisionSettings = HDRVisionSettings.stored(in: userDefaults)
+        self.hdrVisionSettings = storedHDRVisionSettings
+        HDRVisionSettingsBox.shared.update(storedHDRVisionSettings)
         self.playbackCDNPreference =
             PlaybackCDNPreference(
                 rawValue: userDefaults.string(forKey: Self.playbackCDNPreferenceKey) ?? ""

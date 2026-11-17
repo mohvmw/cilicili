@@ -8,8 +8,8 @@ struct PlayerNativePlaybackControls: View {
     let isPlaying: Bool
     let isDanmakuEnabled: Bool
     let showsDanmakuButton: Bool
-    let isHDREnabled: Bool = false
-    let showsHDRButton: Bool = false
+    var isHDREnabled: Bool = false
+    var showsHDRButton: Bool = false
     let canToggleFullscreen: Bool
     let isFullscreenActive: Bool
     let controlsAccessory: AnyView?
@@ -18,7 +18,8 @@ struct PlayerNativePlaybackControls: View {
     let actions: PlayerNativePlaybackControlsActions
 
     /// 显式初始化器：`let` 带默认值的属性不会进入 Swift 自动合成的 memberwise init，
-    /// 不写这个初始化器，调用方传 `isHDREnabled`/`showsHDRButton` 会报 extra arguments。
+    /// 且带默认值的 `let` 也不能在 init 里再赋值（immutable value may only be initialized once），
+    /// 所以这两个 HDR 属性用 `var`，并由这里统一赋值。
     init(
         clock: PlayerPlaybackClock,
         metrics: PlayerNativeControlMetrics,
