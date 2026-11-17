@@ -170,13 +170,30 @@ enum HDRVisionVideoFilter {
         } else {
             timeRange = CMTimeRange(start: .zero, duration: CMTime(seconds: 3600, preferredTimescale: 600))
         }
+        // 轨道 ID：不要猜。合成挂在视频项上，合成引擎按视频项自己的轨道解析，
+        // 而不是按素材的轨道（素材 `.tracks` 是空的）。视频项的轨道在就绪后
+        // 就有了（视频在播，一定有视频轨），从 `item.tracks` 里拿真实的视频轨 ID。
+        // 拿不到时才回退到猜测的 1…8（之前就是这么做的，结果合成器一帧都没收到）。
+        let realVideoTrackIDs = item.tracks
+            .compactMap { $0.assetTrack }
+            .filter { $0.mediaType == .video }
+            .map { $0.trackID }
+        let trackIDs: [CMPersistentTrackID]
+        let trackSource: String
+        if !realVideoTrackIDs.isEmpty {
+            trackIDs = realVideoTrackIDs
+            trackSource = "轨道 \(realVideoTrackIDs.map(String.init).joined(separator: ","))"
+        } else {
+            trackIDs = [1, 2, 3, 4, 5, 6, 7, 8]
+            trackSource = "未找到轨道，猜测 1–8"
+        }
         // iOS 26 上 AVMutableVideoCompositionInstruction 的 requiredSourceTrackIDs
         // 是只读的（该类已废弃），不能直接赋值。改用新 Configuration API 建指令：
-        // 每条候选视频轨一个层指令（层指令配置直接拿轨道 ID，不用素材轨道），
-        // 指令要用的轨道就从层指令里带出来；HLS 视频轨通常从 1 开始编，
-        // 哪个在播，合成器就收到哪个的帧。
-        let layerInstructions = [1, 2, 3, 4, 5, 6, 7, 8].map { id in
-            let layerConfig = AVVideoCompositionLayerInstruction.Configuration(trackID: CMPersistentTrackID(id))
+        // 每条视频轨一个层指令（层指令配置直接拿轨道 ID，不用素材轨道），
+        // 指令要用的轨道就从层指令里带出来；哪个轨道在播，
+        // 合成器就收到哪个的帧。
+        let layerInstructions = trackIDs.map { id in
+            let layerConfig = AVVideoCompositionLayerInstruction.Configuration(trackID: id)
             return AVVideoCompositionLayerInstruction(configuration: layerConfig)
         }
         var instructionConfig = AVVideoCompositionInstruction.Configuration(timeRange: timeRange)
@@ -184,7 +201,7 @@ enum HDRVisionVideoFilter {
         let instruction = AVVideoCompositionInstruction(configuration: instructionConfig)
         composition.instructions = [instruction]
         item.videoComposition = composition
-        setLastApplyStatus("已挂载")
+        setLastApplyStatus("已挂载（\(trackSource)）")
     }
 
     // MARK: - 逐帧应用
