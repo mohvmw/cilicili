@@ -73,6 +73,14 @@ enum HDRVisionVideoFilter {
     /// HDR 源已跳过 / 纯音频已跳过 / 内核未加载：… / 合成创建失败：…。
     static var lastApplyStatus: String { statusLock.withLock { _lastApplyStatus } }
 
+    /// 上次创建是否失败（可重试）。开关关闭 / 已挂载 / 创建中都不算失败。
+    /// 引擎在 item ready 后用它决定是否重试。
+    static var lastApplyFailed: Bool {
+        statusLock.withLock {
+            _lastApplyStatus.hasPrefix("合成创建失败") || _lastApplyStatus.hasPrefix("内核未加载")
+        }
+    }
+
     /// 逐帧回调里内核成功处理 / 原样直通的帧数。直通一直涨而处理帧为 0，说明每帧都没进内核。
     static var frameCounts: (processed: Int, passedThrough: Int) {
         statusLock.withLock { (_framesProcessed, _framesPassedThrough) }
@@ -142,7 +150,11 @@ enum HDRVisionVideoFilter {
                     let isLatest = statusLock.withLock { _applyGeneration } == generation
                     guard isLatest, HDRVisionSettingsBox.shared.settings.enabled else { return }
                     guard let composition else {
-                        setLastApplyStatus("合成创建失败：\(error?.localizedDescription ?? "未知错误")")
+                        // 失败时把素材轨道状态写进诊断：无视频轨说明工厂连轨道都没拿到。
+                        let tracks = item.asset.tracks
+                        let videoCount = tracks.filter { $0.mediaType == .video }.count
+                        let trackInfo = videoCount == 0 ? "无视频轨（轨道\(tracks.count)条）" : "视频轨\(videoCount)条"
+                        setLastApplyStatus("合成创建失败：\(error?.localizedDescription ?? "未知错误")（\(trackInfo)）")
                         return
                     }
                     // 回调时轨道已加载好，帧率能读到，帧间隔才设得上。

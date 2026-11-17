@@ -1589,6 +1589,12 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         } else {
             publishPlaybackState(.ready)
         }
+        // HDR 视界：prepare 时素材轨道还没加载，异步创建可能失败；item
+        // ready 后轨道已加载，若上次创建失败且开关还开着，重试一次。
+        if HDRVisionSettingsBox.shared.settings.enabled,
+           HDRVisionVideoFilter.lastApplyFailed {
+            applyHDRVisionSettingsToCurrentItem()
+        }
     }
 
     private func isCurrentPlayerLayer(_ identity: ObjectIdentifier) -> Bool {
