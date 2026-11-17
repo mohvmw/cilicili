@@ -68,6 +68,28 @@ enum HDRVisionVideoFilter {
     private static var _lastApplyStatus = "未调用"
     private static var _framesProcessed = 0
     private static var _framesPassedThrough = 0
+    /// 最近一次建的指令实际要用的轨道 ID（从指令的 requiredSourceTrackIDs 读回）。
+    /// 若这里是空的，说明 Configuration 没把层指令的轨道带进指令，合成器自然收不到帧。
+    private static var _lastInstructionRequiredTrackIDs: [NSNumber] = []
+    /// 合成器是否拿到过渲染上下文（AVFoundation 实例化合成器并调用
+    /// renderContextChanged 后为 true）。若一直 false，说明合成器根本没被建出来。
+    private static var _compositorRenderContextReceived = false
+
+    /// 最近一次建的指令实际要用的轨道 ID。
+    static var lastInstructionRequiredTrackIDs: [NSNumber] {
+        statusLock.withLock { _lastInstructionRequiredTrackIDs }
+    }
+
+    /// 合成器是否拿到过渲染上下文。
+    static var compositorRenderContextReceived: Bool {
+        statusLock.withLock { _compositorRenderContextReceived }
+    }
+
+    /// 自定义合成器在 renderContextChanged 里调用：AVFoundation 建出了合成器。
+    /// nonisolated：合成器跑在渲染队列上；只写锁保护的变量。
+    nonisolated static func noteCompositorRenderContextReceived() {
+        statusLock.withLock { _compositorRenderContextReceived = true }
+    }
 
     /// Metal 内核是否加载成功（从 default.metallib）。首次读取会触发加载。
     static var kernelCompiled: Bool { kernel != nil }
@@ -201,6 +223,9 @@ enum HDRVisionVideoFilter {
         let instruction = AVVideoCompositionInstruction(configuration: instructionConfig)
         composition.instructions = [instruction]
         item.videoComposition = composition
+        // 把指令实际要用的轨道 ID 读回来记下：若 Configuration 没把层指令的
+        // 轨道带进指令，这里就是空的，合成器收不到帧的原因就找到了。
+        statusLock.withLock { _lastInstructionRequiredTrackIDs = instruction.requiredSourceTrackIDs ?? [] }
         setLastApplyStatus("已挂载（\(trackSource)）")
     }
 

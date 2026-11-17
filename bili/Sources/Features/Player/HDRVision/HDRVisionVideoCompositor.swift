@@ -59,6 +59,7 @@ final class HDRVisionVideoCompositor: NSObject, AVVideoCompositing {
 
     func renderContextChanged(_ newRenderContext: AVVideoCompositionRenderContext) {
         renderContext = newRenderContext
+        HDRVisionVideoFilter.noteCompositorRenderContextReceived()
     }
 
     func startRequest(_ request: AVAsynchronousVideoCompositionRequest) {

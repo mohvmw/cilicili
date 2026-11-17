@@ -35,6 +35,18 @@ struct HDRVisionSettingsView: View {
                         .foregroundStyle(.secondary)
                 }
                 HStack {
+                    Text("指令需轨道")
+                    Spacer()
+                    Text(HDRVisionVideoFilter.lastInstructionRequiredTrackIDs.isEmpty ? "无" : "[\(HDRVisionVideoFilter.lastInstructionRequiredTrackIDs.map { $0.stringValue }.joined(separator: ", "))]")
+                        .foregroundStyle(.secondary)
+                }
+                HStack {
+                    Text("合成器")
+                    Spacer()
+                    Text(HDRVisionVideoFilter.compositorRenderContextReceived ? "已建" : "未建")
+                        .foregroundStyle(.secondary)
+                }
+                HStack {
                     Text("已处理帧 / 直通帧")
                     Spacer()
                     Text("\(HDRVisionVideoFilter.frameCounts.processed) / \(HDRVisionVideoFilter.frameCounts.passedThrough)")
