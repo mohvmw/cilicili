@@ -109,7 +109,13 @@ enum HDRVisionVideoFilter {
         }
         guard let composition = makeVideoComposition(for: item.asset, settings: settings) else {
             item.videoComposition = nil
-            setLastApplyStatus("内核编译失败")
+            // 诊断：内核行显示“已加载”却走到这里时，把内核当时的真实状态写进
+            // 当前画面，避免“已加载却报编译失败”的歧义。
+            if kernel == nil {
+                setLastApplyStatus("内核未加载：\(kernelLoadError ?? "无错误信息")")
+            } else {
+                setLastApplyStatus("合成创建失败（内核已加载）")
+            }
             return
         }
         item.videoComposition = composition
