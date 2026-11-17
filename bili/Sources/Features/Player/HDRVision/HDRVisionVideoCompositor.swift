@@ -7,7 +7,7 @@ import Foundation
 ///
 /// 用它是因为 HLS 桥接素材在 `AVAsset.tracks` 里报 0 条轨道（播放列表已解析、
 /// 时长正常、视频照播），所以基于素材的 `AVVideoComposition` 工厂接口
-/// （同步/异步）都建不出合成。手动建合成 + 自定义合成器不依赖素材轨道：
+///（同步/异步）都建不出合成。手动建合成 + 自定义合成器不依赖素材轨道：
 /// 合成指令里列出候选轨道 ID，合成器收到哪条视频轨的帧就处理哪条。
 ///
 /// 轨道 ID 是按经验列的：HLS 主播放列表有多个清晰度分片，AVFoundation
@@ -16,6 +16,12 @@ import Foundation
 /// 音频轨即使在列表里也不会产生视频请求，所以多列几个无害。
 /// 若已处理帧 / 直通帧一直 0/0，说明 ID 猜错了，需调整候选列表；
 /// 关掉 HDR 开关即可恢复正常播放（开关清除 videoComposition）。
+///
+/// 注意（iOS 26 SDK）：`AVVideoCompositing` 的像素缓冲属性在新 SDK 里是
+/// `[String: any Sendable]`（旧的 `[String: Any]` 不再满足协议），且必须提供
+/// `sourcePixelBufferAttributes`（可选字典）；像素格式值必须是单个值
+///（写成数组会导致合成器收不到请求），并加上 `kCVPixelBufferMetalCompatibilityKey`
+///（否则 Metal 渲染可能黑屏）。
 final class HDRVisionVideoCompositor: NSObject, AVVideoCompositing {
 
     /// 候选视频轨道 ID。
@@ -27,12 +33,28 @@ final class HDRVisionVideoCompositor: NSObject, AVVideoCompositing {
 
     // MARK: - AVVideoCompositing
 
-    var requiredPixelBufferAttributesForRenderContext: [String: Any] {
-        [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
+    /// 合成器接受的源帧格式：32 位 BGRA，Metal 兼容。
+    var sourcePixelBufferAttributes: [String: any Sendable]? {
+        [
+            String(kCVPixelBufferPixelFormatTypeKey): Int(kCVPixelFormatType_32BGRA),
+            String(kCVPixelBufferMetalCompatibilityKey): true,
+        ]
     }
 
-    var supportedPixelBufferAttributes: [String: Any] {
-        [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
+    /// 渲染上下文输出缓冲的格式：32 位 BGRA，Metal 兼容。
+    var requiredPixelBufferAttributesForRenderContext: [String: any Sendable] {
+        [
+            String(kCVPixelBufferPixelFormatTypeKey): Int(kCVPixelFormatType_32BGRA),
+            String(kCVPixelBufferMetalCompatibilityKey): true,
+        ]
+    }
+
+    /// 合成器支持的源帧格式（与上面一致）。
+    var supportedPixelBufferAttributes: [String: any Sendable] {
+        [
+            String(kCVPixelBufferPixelFormatTypeKey): Int(kCVPixelFormatType_32BGRA),
+            String(kCVPixelBufferMetalCompatibilityKey): true,
+        ]
     }
 
     func renderContextChanged(_ newRenderContext: AVVideoCompositionRenderContext) {
@@ -44,9 +66,10 @@ final class HDRVisionVideoCompositor: NSObject, AVVideoCompositing {
             request.finish(with: NSError(domain: "HDRVisionVideoCompositor", code: -1, userInfo: [NSLocalizedDescriptionKey: "render context 未设置"]))
             return
         }
-        // 找到当前在播的视频轨的帧：先试请求自带的 track ID，再试候选列表。
+        // 找到当前在播的视频轨的帧：先试请求自带的轨道 ID（指令的层指令
+        // 决定了这次请求覆盖哪些轨道），再试候选列表兜底。
         var sourcePixelBuffer: CVPixelBuffer?
-        var trackIDs = [request.sourceTrackID]
+        var trackIDs = request.sourceTrackIDs.map { CMPersistentTrackID($0.int32Value) }
         trackIDs.append(contentsOf: Self.candidateTrackIDs)
         for trackID in trackIDs {
             if let frame = request.sourceFrame(byTrackID: trackID) {

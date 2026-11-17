@@ -227,7 +227,9 @@ struct HDRVisionSettings: Codable, Equatable, Sendable {
 /// 滤镜回调跑在 Core Image 的渲染队列上，不能碰 @MainActor 的 LibraryStore；
 /// 这里用一把锁做线程安全的快照，LibraryStore 每次写入设置时同步更新它。
 final class HDRVisionSettingsBox: @unchecked Sendable {
-    static let shared = HDRVisionSettingsBox()
+    /// nonisolated：逐帧滤镜回调（渲染队列，非主线程）要读它；初始化只读
+    /// nonisolated 的 stored()，设置本身由锁保护。
+    nonisolated static let shared = HDRVisionSettingsBox()
 
     private let lock = NSLock()
     private var _settings: HDRVisionSettings
@@ -236,7 +238,8 @@ final class HDRVisionSettingsBox: @unchecked Sendable {
         _settings = HDRVisionSettings.stored()
     }
 
-    var settings: HDRVisionSettings {
+    /// nonisolated：同上；读的是锁保护的快照。
+    nonisolated var settings: HDRVisionSettings {
         lock.withLock { _settings }
     }
 

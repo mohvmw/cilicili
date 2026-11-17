@@ -37,7 +37,10 @@ enum HDRVisionVideoFilter {
     /// 运行时编译（`kernels(withMetalString:)`）在真机上以 CIKernel error 13
     /// 失败且无详细信息，改走构建期编译后，Metal 源码错误会直接出现在构建日志里。
     /// 不加 private：自定义合成器（HDRVisionVideoCompositor）要读它。
-    static let kernel: CIKernel? = {
+    /// nonisolated：合成器跑在渲染队列（非主线程）上，内核加载与逐帧应用
+    /// 都不碰 @MainActor 的状态（加载失败只写锁保护的 _kernelLoadError，
+    /// 日志用的是 nonisolated 的 PlayerMetricsLog.logger）。
+    nonisolated static let kernel: CIKernel? = {
         guard let url = Bundle.main.url(forResource: "default", withExtension: "metallib") else {
             setKernelLoadError("未找到 default.metallib（Metal 库未打包）")
             PlayerMetricsLog.logger.error("hdrVisionKernel load failed: default.metallib not found")
@@ -91,12 +94,14 @@ enum HDRVisionVideoFilter {
     }
 
     /// 自定义合成器逐帧调用：内核成功处理了一帧。
-    static func noteFrameProcessed() {
+    /// nonisolated：合成器跑在渲染队列上；计数只碰锁保护的变量。
+    nonisolated static func noteFrameProcessed() {
         statusLock.withLock { _framesProcessed += 1 }
     }
 
     /// 自定义合成器逐帧调用：这一帧没进内核（无帧 / 内核失败），原样直通。
-    static func noteFramePassedThrough() {
+    /// nonisolated：同上。
+    nonisolated static func noteFramePassedThrough() {
         statusLock.withLock { _framesPassedThrough += 1 }
     }
 
@@ -109,7 +114,8 @@ enum HDRVisionVideoFilter {
     /// 最近一次内核加载失败的原因（Metal 编译错误信息），成功时为 nil。
     static var kernelLoadError: String? { statusLock.withLock { _kernelLoadError } }
 
-    private static func setKernelLoadError(_ message: String) {
+    /// nonisolated：内核的 nonisolated 初始化闭包里调用它；只写锁保护的变量。
+    nonisolated private static func setKernelLoadError(_ message: String) {
         statusLock.withLock { _kernelLoadError = message }
     }
 
@@ -157,15 +163,25 @@ enum HDRVisionVideoFilter {
         composition.renderScale = Float(settings.renderScale)
         // 帧间隔给 1/60s（允许到 60fps；源是 30fps 时仍按源帧率出帧）。
         composition.frameDuration = CMTime(seconds: 1.0 / 60.0, preferredTimescale: 600)
-        let instruction = AVMutableVideoCompositionInstruction()
         let duration = item.duration
+        let timeRange: CMTimeRange
         if duration.isValid, duration.seconds > 0 {
-            instruction.timeRange = CMTimeRange(start: .zero, duration: duration)
+            timeRange = CMTimeRange(start: .zero, duration: duration)
         } else {
-            instruction.timeRange = CMTimeRange(start: .zero, duration: CMTime(seconds: 3600, preferredTimescale: 600))
+            timeRange = CMTimeRange(start: .zero, duration: CMTime(seconds: 3600, preferredTimescale: 600))
         }
-        // 候选视频轨道 ID：HLS 视频轨通常从 1 开始编；哪个在播，合成器就收到哪个的帧。
-        instruction.requiredSourceTrackIDs = [1, 2, 3, 4, 5, 6, 7, 8].map { NSNumber(value: $0) }
+        // iOS 26 上 AVMutableVideoCompositionInstruction 的 requiredSourceTrackIDs
+        // 是只读的（该类已废弃），不能直接赋值。改用新 Configuration API 建指令：
+        // 每条候选视频轨一个层指令（层指令配置直接拿轨道 ID，不用素材轨道），
+        // 指令要用的轨道就从层指令里带出来；HLS 视频轨通常从 1 开始编，
+        // 哪个在播，合成器就收到哪个的帧。
+        let layerInstructions = [1, 2, 3, 4, 5, 6, 7, 8].map { id in
+            let layerConfig = AVVideoCompositionLayerInstruction.Configuration(trackID: CMPersistentTrackID(id))
+            return AVVideoCompositionLayerInstruction(configuration: layerConfig)
+        }
+        let instructionConfig = AVVideoCompositionInstruction.Configuration(timeRange: timeRange)
+        instructionConfig.layerInstructions = layerInstructions
+        let instruction = AVVideoCompositionInstruction(configuration: instructionConfig)
         composition.instructions = [instruction]
         item.videoComposition = composition
         setLastApplyStatus("已挂载")
@@ -174,7 +190,8 @@ enum HDRVisionVideoFilter {
     // MARK: - 逐帧应用
 
     /// 不加 private：自定义合成器（HDRVisionVideoCompositor）逐帧调用它。
-    static func applyKernel(
+    /// nonisolated：合成器跑在渲染队列上；只做纯计算 + CIKernel.apply。
+    nonisolated static func applyKernel(
         _ kernel: CIKernel,
         to image: CIImage,
         settings: HDRVisionSettings
@@ -193,7 +210,8 @@ enum HDRVisionVideoFilter {
 
     /// 与脚本 `computeUniformData` 相同的 uniform 计算（32 个 float 的子集，
     /// 只保留内核实际用到的 19 个；顺序与内核参数声明一致）。
-    private static func computeUniforms(_ settings: HDRVisionSettings) -> [Float] {
+    /// nonisolated：applyKernel（nonisolated）里调用它；纯计算。
+    nonisolated private static func computeUniforms(_ settings: HDRVisionSettings) -> [Float] {
         let isBT = settings.mappingMode == .bt2446a
         let exposureMultiplier = Float(pow(2.0, settings.activeExposure))
         let saturation = Float(settings.activeSaturation)
