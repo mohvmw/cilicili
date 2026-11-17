@@ -1594,6 +1594,26 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         if HDRVisionSettingsBox.shared.settings.enabled,
            HDRVisionVideoFilter.lastApplyFailed {
             applyHDRVisionSettingsToCurrentItem()
+        } else if HDRVisionSettingsBox.shared.settings.enabled,
+                  HDRVisionVideoFilter.lastApplyStatus == "加载轨道中…" {
+            // 竞态：item 在安装时就已 ready 的话，ready 回调会在轨道加载
+            // 完成前跑到这里，那时还没失败、重试条件不成立；等加载落定
+            // 后失败状态就再也没人重试了（ready 只触发一次）。等它落定
+            // 再看一次，最多等 5 秒，只多试一次。
+            let item = item
+            Task { @MainActor [weak self, weak item] in
+                for _ in 0..<5 {
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    guard let self, let item else { return }
+                    guard HDRVisionSettingsBox.shared.settings.enabled,
+                          isCurrentPlayerItem(item) else { return }
+                    if HDRVisionVideoFilter.lastApplyFailed {
+                        applyHDRVisionSettingsToCurrentItem()
+                        return
+                    }
+                    guard HDRVisionVideoFilter.lastApplyStatus == "加载轨道中…" else { return }
+                }
+            }
         }
     }
 
