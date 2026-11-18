@@ -21,7 +21,13 @@ enum VideoDetailPlaybackQualityMenuBuilder {
         pendingPlayVariantID: String?,
         isSwitchingPlayQuality: Bool
     ) -> [VideoDetailPlaybackQualityMenuItem] {
-        compactQualityVariants(from: playVariants).map { variant in
+        // 清晰度从大到小（上大下小）：最高档在最上面。全屏 UIMenu 与竖屏
+        // sheet 共用这份顺序；去重后按 qn 码降序，不动全局 sortedPlayVariants
+        //（它还管默认选档/节能选档，改它风险大）。选中态按 quality 匹配，
+        // 不按下标，排序不影响。
+        compactQualityVariants(from: playVariants)
+            .sorted { $0.quality > $1.quality }
+            .map { variant in
             let systemImage: String
             if !variant.isPlayable {
                 systemImage = "lock.fill"

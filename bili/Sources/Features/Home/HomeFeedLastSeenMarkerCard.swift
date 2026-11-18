@@ -27,7 +27,7 @@ struct HomeFeedLastSeenMarkerCard: View {
 
     private var singleColumnLabel: some View {
         VStack(alignment: .leading, spacing: 8) {
-            cover(cornerRadius: 18)
+            cover(cornerRadius: 0)
 
             HStack(alignment: .center, spacing: 9) {
                 markerAvatar(size: 34, iconSize: 15)
@@ -55,7 +55,7 @@ struct HomeFeedLastSeenMarkerCard: View {
 
     private var doubleColumnLabel: some View {
         VStack(alignment: .leading, spacing: 8) {
-            cover(cornerRadius: 15)
+            cover(cornerRadius: 0)
 
             VStack(alignment: .leading, spacing: 4) {
                 StableVideoTitleText(
@@ -121,7 +121,7 @@ struct HomeFeedLastSeenMarkerCard: View {
             .padding(.horizontal, 10)
             .padding(.bottom, 10)
         }
-        .videoCardBorderedSurface(cornerRadius: 18)
+        .videoCardBorderedSurface(cornerRadius: 0)
         .contentShape(Rectangle())
     }
 
@@ -164,13 +164,13 @@ struct HomeFeedLastSeenMarkerCard: View {
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .frame(height: max(coverSize.height + 20, 108), alignment: .topLeading)
-        .compactVideoResultSurface(cornerRadius: 18)
+        .compactVideoResultSurface(cornerRadius: 0)
         .contentShape(Rectangle())
     }
 
     @ViewBuilder
     private func borderedSingleColumnCover(size: CGSize) -> some View {
-        let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: 0, style: .continuous)
         let content = VStack(spacing: 6) {
             Image(systemName: "arrow.clockwise")
                 .font(.system(size: 20, weight: .semibold))

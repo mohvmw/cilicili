@@ -14,9 +14,11 @@ using namespace metal;
 // 经 CVMetalTextureCache 转成 bgra8Unorm 纹理；输出直接写 drawable 的
 // rgba16Float 纹理（EDR），超 1.0 的高光在 XDR 屏上真正亮起来。
 //
-// 注意：去色带（deband）与 CAS 锐化暂未移植到计算核（它们要采邻域，
-// 在计算核里要另外处理）；先保证核心的 BT.2446a / power 色彩管线、
-// 正确的几何与色彩、可见的亮度变化。去色带/CAS 后续再补。
+// 管线顺序与脚本一致：deband（4 环邻域采样）→ CAS（8 邻域 + 16/32px
+// 远采样）→ 曝光 → BT.2446a / power → OKLab 饱和度。邻域采样用归一化
+// UV，像素偏移乘 texelSize（= 1 / 源尺寸）换算；sampler 为 clamp_to_edge，
+// 边缘不采黑。deband/CAS 的开关与强度由设置里的 debandEnabled /
+// debandThreshold / sharpenEnabled / sharpenStrength 控制（默认开）。
 
 float luminance_c(float3 c) {
     return dot(c, float3(0.2126, 0.7152, 0.0722));
@@ -187,6 +189,163 @@ float3 applyColorPipeline_c(float3 color, HDRVisionComputeUniforms u) {
     return c;
 }
 
+// ---- 去色带（deband）与 CAS 锐化：从 CI 内核移植到计算核 ----
+// CI 版用 sampler_h 在像素坐标上采样邻域；计算核用归一化 UV 采样，
+// 像素偏移要乘 texelSize（= 1 / 源尺寸）换算成 UV 偏移。
+// 顺序与脚本一致：deband → CAS → 色彩管线。
+
+struct RingResult_c {
+    float3 avg;
+    float variance;
+};
+
+RingResult_c sampleRing_c(
+    texture2d<float, access::sample> tex,
+    sampler s,
+    float2 uv,
+    float2 texelSize,
+    float radius
+) {
+    float2 t = float2(radius, radius) * texelSize;
+    float3 s0 = tex.sample(s, uv + float2(t.x, 0.0)).rgb;
+    float3 s1 = tex.sample(s, uv - float2(t.x, 0.0)).rgb;
+    float3 s2 = tex.sample(s, uv + float2(0.0, t.y)).rgb;
+    float3 s3 = tex.sample(s, uv - float2(0.0, t.y)).rgb;
+    float3 s4 = tex.sample(s, uv + t).rgb;
+    float3 s5 = tex.sample(s, uv - t).rgb;
+    float3 s6 = tex.sample(s, uv + float2(t.x, -t.y)).rgb;
+    float3 s7 = tex.sample(s, uv + float2(-t.x, t.y)).rgb;
+
+    float3 avg = (s0 + s1 + s2 + s3 + s4 + s5 + s6 + s7) * 0.125;
+
+    float d0 = abs(s0.r - avg.r) + abs(s0.g - avg.g) + abs(s0.b - avg.b);
+    float d1 = abs(s1.r - avg.r) + abs(s1.g - avg.g) + abs(s1.b - avg.b);
+    float d2 = abs(s2.r - avg.r) + abs(s2.g - avg.g) + abs(s2.b - avg.b);
+    float d3 = abs(s3.r - avg.r) + abs(s3.g - avg.g) + abs(s3.b - avg.b);
+    float d4 = abs(s4.r - avg.r) + abs(s4.g - avg.g) + abs(s4.b - avg.b);
+    float d5 = abs(s5.r - avg.r) + abs(s5.g - avg.g) + abs(s5.b - avg.b);
+    float d6 = abs(s6.r - avg.r) + abs(s6.g - avg.g) + abs(s6.b - avg.b);
+    float d7 = abs(s7.r - avg.r) + abs(s7.g - avg.g) + abs(s7.b - avg.b);
+    float variance = (d0 + d1 + d2 + d3 + d4 + d5 + d6 + d7) * 0.125;
+
+    RingResult_c r;
+    r.avg = avg;
+    r.variance = variance;
+    return r;
+}
+
+float3 applyDeband_c(
+    texture2d<float, access::sample> tex,
+    sampler s,
+    float2 uv,
+    float2 texelSize,
+    float3 centerColor,
+    float threshold
+) {
+    RingResult_c r3 = sampleRing_c(tex, s, uv, texelSize, 3.0);
+    RingResult_c r8 = sampleRing_c(tex, s, uv, texelSize, 8.0);
+    RingResult_c r12 = sampleRing_c(tex, s, uv, texelSize, 12.0);
+    RingResult_c r28 = sampleRing_c(tex, s, uv, texelSize, 28.0);
+
+    float d3 = smoothstep(threshold * 0.5, threshold * 3.0, r3.variance);
+    float d8 = smoothstep(threshold * 0.5, threshold * 3.0, r8.variance);
+    float d12 = smoothstep(threshold * 0.5, threshold * 3.0, r12.variance);
+    float detailMask = max(max(d3, d8), d12);
+
+    float flatLarge = 1.0 - smoothstep(threshold * 0.5, threshold * 2.5, r28.variance);
+
+    float strength = flatLarge * (1.0 - detailMask) * 0.92;
+
+    float3 smoothValue = r3.avg * 0.2 + r12.avg * 0.5 + r28.avg * 0.3;
+
+    return mix(centerColor, smoothValue, strength);
+}
+
+float3 applyCAS_c(
+    texture2d<float, access::sample> tex,
+    sampler s,
+    float2 uv,
+    float2 texelSize,
+    float3 centerRGB,
+    float strength
+) {
+    if (strength < 0.01) {
+        return centerRGB;
+    }
+
+    float2 o1 = float2(1.0, 1.0) * texelSize;
+    float3 cN = tex.sample(s, uv + float2(0.0, -o1.y)).rgb;
+    float3 cS = tex.sample(s, uv + float2(0.0, o1.y)).rgb;
+    float3 cE = tex.sample(s, uv + float2(o1.x, 0.0)).rgb;
+    float3 cW = tex.sample(s, uv - float2(o1.x, 0.0)).rgb;
+    float3 cNE = tex.sample(s, uv + float2(o1.x, -o1.y)).rgb;
+    float3 cNW = tex.sample(s, uv + float2(-o1.x, -o1.y)).rgb;
+    float3 cSE = tex.sample(s, uv + float2(o1.x, o1.y)).rgb;
+    float3 cSW = tex.sample(s, uv + float2(-o1.x, o1.y)).rgb;
+
+    float2 t16 = float2(16.0, 16.0) * texelSize;
+    float3 fN16 = tex.sample(s, uv + float2(0.0, -t16.y)).rgb;
+    float3 fS16 = tex.sample(s, uv + float2(0.0, t16.y)).rgb;
+    float3 fE16 = tex.sample(s, uv + float2(t16.x, 0.0)).rgb;
+    float3 fW16 = tex.sample(s, uv - float2(t16.x, 0.0)).rgb;
+
+    float2 t32 = float2(32.0, 32.0) * texelSize;
+    float3 fN32 = tex.sample(s, uv + float2(0.0, -t32.y)).rgb;
+    float3 fS32 = tex.sample(s, uv + float2(0.0, t32.y)).rgb;
+    float3 fE32 = tex.sample(s, uv + float2(t32.x, 0.0)).rgb;
+    float3 fW32 = tex.sample(s, uv - float2(t32.x, 0.0)).rgb;
+
+    float3 lumaW = float3(0.2126, 0.7152, 0.0722);
+    float centerLuma = dot(centerRGB, lumaW);
+
+    float lumaN = dot(cN, lumaW);
+    float lumaS = dot(cS, lumaW);
+    float lumaE = dot(cE, lumaW);
+    float lumaWv = dot(cW, lumaW);
+    float lumaNW = dot(cNW, lumaW);
+    float lumaNE = dot(cNE, lumaW);
+    float lumaSW = dot(cSW, lumaW);
+    float lumaSE = dot(cSE, lumaW);
+
+    float lumaMin = min(min(min(lumaN, lumaS), min(lumaE, lumaWv)),
+                        min(min(lumaNW, lumaNE), min(lumaSW, lumaSE)));
+    float lumaMax = max(max(max(lumaN, lumaS), max(lumaE, lumaWv)),
+                        max(max(lumaNW, lumaNE), max(lumaSW, lumaSE)));
+
+    float range = max(lumaMax - lumaMin, 1e-5);
+    float softMin = max(0.0, lumaMin - range * 0.25);
+    float softMax = min(2.0, lumaMax + range * 0.25);
+
+    float3 avg = (cN + cS + cE + cW) * 0.125 + (cNE + cNW + cSE + cSW) * 0.0625;
+    float avgLuma = dot(avg, lumaW);
+
+    float varN = abs(lumaN - avgLuma);
+    float varS = abs(lumaS - avgLuma);
+    float varE = abs(lumaE - avgLuma);
+    float varW = abs(lumaWv - avgLuma);
+    float localVar = (varN + varS + varE + varW) * 0.25;
+
+    float f16Avg = (dot(fN16, lumaW) + dot(fS16, lumaW) + dot(fE16, lumaW) + dot(fW16, lumaW)) * 0.25;
+    float f32Avg = (dot(fN32, lumaW) + dot(fS32, lumaW) + dot(fE32, lumaW) + dot(fW32, lumaW)) * 0.25;
+    float farContrast16 = abs(centerLuma - f16Avg);
+    float farContrast32 = abs(centerLuma - f32Avg);
+    float farContrast = min(farContrast16, farContrast32);
+
+    float noiseMask = smoothstep(0.005, 0.03, localVar);
+    float trueEdgeMask = smoothstep(0.02, 0.05, farContrast);
+
+    float effectiveStrength = strength * noiseMask * trueEdgeMask;
+
+    float3 detail = centerRGB - avg;
+    float3 sharpened = centerRGB + detail * effectiveStrength;
+
+    float outLuma = dot(sharpened, lumaW);
+    float clampedLuma = clamp(outLuma, softMin, softMax);
+    float lumaScale = clampedLuma / max(outLuma, 1e-6);
+
+    return sharpened * lumaScale;
+}
+
 struct HDRVisionComputeParams {
     float2 destOrigin;  // 目标矩形左上角（目标纹理像素坐标）
     float2 destSize;    // 目标矩形尺寸（目标纹理像素）
@@ -219,6 +378,15 @@ kernel void hdrVisionCompute(
     );
     constexpr sampler s(address::clamp_to_edge, filter::linear);
     float3 color = srcTexture.sample(s, srcUV).rgb;
+    // 去色带 → CAS，与脚本顺序一致；开关由设置里的 debandEnabled /
+    // sharpenEnabled 控制，默认开（与脚本默认值一致）。
+    float2 texelSize = 1.0 / p.srcSize;
+    if (u.debandEnabled > 0.5) {
+        color = applyDeband_c(srcTexture, s, srcUV, texelSize, color, u.debandThreshold);
+    }
+    if (u.sharpenEnabled > 0.5) {
+        color = applyCAS_c(srcTexture, s, srcUV, texelSize, color, u.sharpenStrength);
+    }
     // 色彩管线（BT.2446a / power + OKLab 饱和度）。输出可超 1.0，
     // 写进 rgba16Float 纹理保留给 EDR 显示，不截断。
     color = applyColorPipeline_c(color, u);

@@ -35,7 +35,7 @@ struct YouTubeStyleVideoFeedThumbnail: View {
                 .clipped()
             }
             .frame(maxWidth: .infinity)
-            .videoCoverSurface(cornerRadius: 18, shadowLevel: coverShadowLevel)
+            .videoCoverSurface(cornerRadius: 0, shadowLevel: coverShadowLevel)
     }
 
     @ViewBuilder

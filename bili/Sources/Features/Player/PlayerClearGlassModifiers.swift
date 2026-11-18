@@ -45,7 +45,12 @@ extension View {
     }
 
     func biliPlayerExpandedHitTarget(metrics: PlayerNativeControlMetrics) -> some View {
-        let horizontal = max((44 - metrics.controlHeight) / 2, 4)
+        // 横向外扩钳制到行内间距的一半：相邻按钮的热区若重叠，重叠带里的
+        // 点按会被判给后一个兄弟视图。点播时弹幕按钮隐藏，HDR 与全屏直接
+        // 相邻，竖屏热区各扩 8pt、间距 4pt，重叠 12pt，点 HDR 右侧会变全屏。
+        // 钳制后竖屏横向 2pt、横屏 3pt，热区仍有 32–40pt 宽，重叠消失。
+        // 纵向没有相邻按钮，不动。
+        let horizontal = min(max((44 - metrics.controlHeight) / 2, 4), metrics.controlSpacing / 2)
         let vertical = max((44 - metrics.controlHeight) / 2, 8)
         return biliPlayerExpandedHitTarget(horizontal: horizontal, vertical: vertical)
     }

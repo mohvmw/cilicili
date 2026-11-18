@@ -77,11 +77,11 @@ struct HomeRecommendationFeedbackMenu: ViewModifier {
     private var selectionOutline: some View {
         switch metrics.mode {
         case .borderedSingleColumn, .borderedDoubleColumn:
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: 0, style: .continuous)
                 .strokeBorder(.tint, lineWidth: 3)
         case .singleColumn, .doubleColumn:
             GeometryReader { geometry in
-                RoundedRectangle(cornerRadius: metrics.mode == .singleColumn ? 18 : 15, style: .continuous)
+                RoundedRectangle(cornerRadius: 0, style: .continuous)
                     .strokeBorder(.tint, lineWidth: 3)
                     .frame(width: geometry.size.width, height: geometry.size.width * 9 / 16)
             }

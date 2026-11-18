@@ -17,7 +17,9 @@ struct HomeFeedLayoutMetrics {
         standardHorizontalInset: CGFloat = 20
     ) {
         self.mode = mode
-        let doubleColumnSpacing: CGFloat = mode == .borderedDoubleColumn ? 12 : 14
+        // 双列边距/间距向官方 B 站看齐：边距 20→6、列间距 14→6，
+        // 封面宽 (390-12-6)/2 = 186pt（+10.7%），高 16:9 不变。
+        let doubleColumnSpacing: CGFloat = mode == .borderedDoubleColumn ? 12 : 6
         let doubleColumnCoverHeightRatio: CGFloat = mode == .borderedDoubleColumn ? 10 / 16 : 9 / 16
         doubleColumns = [
             GridItem(.flexible(), spacing: doubleColumnSpacing),
@@ -34,8 +36,8 @@ struct HomeFeedLayoutMetrics {
             feedHorizontalPadding = 0
         case .doubleColumn:
             feedColumns = doubleColumns
-            feedSpacing = 22
-            feedHorizontalPadding = standardHorizontalInset
+            feedSpacing = 18
+            feedHorizontalPadding = 6
         case .borderedDoubleColumn:
             feedColumns = doubleColumns
             feedSpacing = 18

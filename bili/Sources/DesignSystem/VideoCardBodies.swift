@@ -23,10 +23,10 @@ struct VideoCardElevatedBody<Cover: View>: View {
         }
         .background(Color(.secondarySystemGroupedBackground))
         .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(cornerRadius: 0, style: .continuous)
                 .stroke(Color(.separator).opacity(0.10), lineWidth: 0.5)
         }
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 0, style: .continuous))
         .mediaContentShadow(.subtle)
     }
 }
@@ -41,7 +41,7 @@ struct VideoCardBlendedBody<Cover: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             cover
-                .videoCoverSurface(cornerRadius: 15, shadowLevel: .control)
+                .videoCoverSurface(cornerRadius: 0, shadowLevel: .control)
 
             VideoCardTextStack(
                 display: display,
@@ -61,7 +61,7 @@ struct VideoCardBorderedBody<Cover: View>: View {
     let showsAuthorIdentity: Bool
     let usesGenericAuthorIcon: Bool
 
-    private let cornerRadius: CGFloat = 18
+    private let cornerRadius: CGFloat = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -122,14 +122,14 @@ struct VideoCardBorderedCompactBody: View, Equatable {
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .frame(height: max(coverSize.height + 20, 108), alignment: .topLeading)
-        .compactVideoResultSurface(cornerRadius: 18)
+        .compactVideoResultSurface(cornerRadius: 0)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityLabel(display.title)
     }
 
     private var cover: some View {
-        let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: 0, style: .continuous)
 
         return AdaptiveVideoCoverImage(
             display: display,
@@ -236,15 +236,15 @@ struct VideoCardBorderedCompactBody: View, Equatable {
 }
 
 extension View {
-    func compactVideoResultSurface(cornerRadius: CGFloat = 18) -> some View {
+    func compactVideoResultSurface(cornerRadius: CGFloat = 0) -> some View {
         modifier(CompactVideoResultSurfaceModifier(cornerRadius: cornerRadius))
     }
 
-    func videoCardBorderedSurface(cornerRadius: CGFloat = 18, showsShadow: Bool = true) -> some View {
+    func videoCardBorderedSurface(cornerRadius: CGFloat = 0, showsShadow: Bool = true) -> some View {
         modifier(VideoCardBorderedSurfaceModifier(cornerRadius: cornerRadius, showsShadow: showsShadow))
     }
 
-    func videoCardBorderedCover(cornerRadius: CGFloat = 14) -> some View {
+    func videoCardBorderedCover(cornerRadius: CGFloat = 0) -> some View {
         videoCardBorderedCover(
             in: UnevenRoundedRectangle(
                 topLeadingRadius: cornerRadius,

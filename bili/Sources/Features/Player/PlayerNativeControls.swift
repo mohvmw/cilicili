@@ -88,6 +88,14 @@ struct PlayerNativePlaybackControls: View {
                     actions: actions
                 )
             }
+            // 控件整体衬底：白色小字直接压在视频画面上看不清，整个控制簇
+            // （进度条 + 按钮行）后面垫一层黑色半透明底。0.45 不透明度在
+            // 亮画面上也够衬，圆角 12 与玻璃质感协调。背景在 playbackControls
+            // 内部，会随控制栏一起淡入淡出；外层已处理安全区内边距，不压
+            // Home Indicator；边缘渐变遮罩保留，两者叠加不冲突。
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .frame(maxWidth: .infinity)
         }
         .frame(maxWidth: .infinity)

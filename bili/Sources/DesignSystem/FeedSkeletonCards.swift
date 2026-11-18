@@ -22,7 +22,7 @@ struct VideoFeedSkeletonCard: View {
 
     private var singleColumnBody: some View {
         VStack(alignment: .leading, spacing: 8) {
-            SkeletonAspectBlock(cornerRadius: 18)
+            SkeletonAspectBlock(cornerRadius: 0)
 
             HStack(alignment: .center, spacing: 9) {
                 SkeletonBlock(width: 34, height: 34, shape: .circle)
@@ -43,7 +43,7 @@ struct VideoFeedSkeletonCard: View {
 
     private var gridBody: some View {
         VStack(alignment: .leading, spacing: 8) {
-            SkeletonAspectBlock(cornerRadius: 15)
+            SkeletonAspectBlock(cornerRadius: 0)
 
             VStack(alignment: .leading, spacing: 4) {
                 VStack(alignment: .leading, spacing: 4) {
@@ -92,7 +92,7 @@ struct VideoFeedSkeletonCard: View {
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .frame(height: max(coverSize.height + 20, 108), alignment: .topLeading)
-        .compactVideoResultSurface(cornerRadius: 18)
+        .compactVideoResultSurface(cornerRadius: 0)
         .padding(.vertical, 6)
         .accessibilityLabel("正在加载视频")
     }
@@ -130,7 +130,7 @@ struct DynamicFeedSkeletonCard: View {
 struct LiveRoomSkeletonCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            SkeletonAspectBlock(aspectRatio: 16 / 10, cornerRadius: 14)
+            SkeletonAspectBlock(aspectRatio: 16 / 10, cornerRadius: 0)
                 .videoCardBorderedCover()
 
             VStack(alignment: .leading, spacing: 4) {
@@ -151,7 +151,7 @@ struct LiveRoomSkeletonCard: View {
             .padding(.bottom, 10)
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
-        .videoCardBorderedSurface(cornerRadius: 18)
+        .videoCardBorderedSurface(cornerRadius: 0)
         .accessibilityLabel("正在加载直播间")
     }
 }

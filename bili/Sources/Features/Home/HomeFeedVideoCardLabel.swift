@@ -35,7 +35,7 @@ struct HomeFeedVideoCardLabel: View {
                 showsCoverViewCountBadge: false,
                 surfaceStyle: .blended,
                 fixedCoverSize: metrics.doubleColumnFixedCoverSize,
-                coverMaximumPixelLength: 480
+                coverMaximumPixelLength: 600
             )
             .equatable()
         case .borderedDoubleColumn:
