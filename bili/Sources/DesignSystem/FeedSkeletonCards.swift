@@ -113,7 +113,7 @@ struct DynamicFeedSkeletonCard: View {
                 SkeletonBlock(width: 260, height: 17, shape: .rounded(5))
             }
 
-            SkeletonAspectBlock(cornerRadius: 20)
+            SkeletonAspectBlock(cornerRadius: 0)
 
             HStack(spacing: 10) {
                 SkeletonBlock(height: 44, shape: .capsule)

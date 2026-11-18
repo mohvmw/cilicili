@@ -70,22 +70,27 @@ nonisolated struct PlaybackEnvironment: Sendable {
         return [80, 64, 32, 16, 6]
     }
 
+    // 前向缓存时长 ×10（用户要求）：WiFi 1.15→11.5 秒、未知 0.9→9 秒、
+    // 蜂窝 0.45→4.5 秒。1080P 高码率约 8Mbps 时 11.5 秒 ≈ 11MB，4K 约 29MB。
+    // 启动仍走 startupForwardBufferDuration（0.06 秒快启），秒开不变；这是
+    // 给 AVPlayer 的目标/提示值，实际缓存还受分片是否已下载到影响。蜂窝下
+    // 提前下 10 倍内容、一切换就白下，流量消耗会明显变大。
     nonisolated var preferredForwardBufferDuration: TimeInterval {
         if shouldPreferConservativePlayback {
             switch networkClass {
             case .wifi, .unknown:
-                return 0.55
+                return 5.5
             case .cellular, .constrained:
-                return 0.45
+                return 4.5
             }
         }
         switch networkClass {
         case .wifi:
-            return 1.15
+            return 11.5
         case .unknown:
-            return 0.9
+            return 9.0
         case .cellular, .constrained:
-            return 0.45
+            return 4.5
         }
     }
 
@@ -93,18 +98,18 @@ nonisolated struct PlaybackEnvironment: Sendable {
         if shouldPreferConservativePlayback {
             switch networkClass {
             case .wifi, .unknown:
-                return 0.75
+                return 7.5
             case .cellular, .constrained:
-                return 0.6
+                return 6.0
             }
         }
         switch networkClass {
         case .wifi:
-            return 1.35
+            return 13.5
         case .unknown:
-            return 1.0
+            return 10.0
         case .cellular, .constrained:
-            return 0.6
+            return 6.0
         }
     }
 

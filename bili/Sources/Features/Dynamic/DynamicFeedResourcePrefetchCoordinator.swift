@@ -104,7 +104,8 @@ final class DynamicFeedResourcePrefetchCoordinator {
         var coverSources = [RemoteImageSource]()
         var seenURLs = Set<String>()
 
-        let itemLimit = environment.shouldPreferConservativePlayback ? 5 : 8
+        // 120Hz：预取窗口加大（8→12 条，保守 5→8），单列大卡一屏 1–2 张，12 条覆盖数屏。
+        let itemLimit = environment.shouldPreferConservativePlayback ? 8 : 12
         let imagesPerItemLimit = environment.shouldPreferConservativePlayback ? 2 : 3
         let totalImageLimit = environment.shouldPreferConservativePlayback ? 4 : 6
         let coverTargetPixelSize = environment.shouldPreferConservativePlayback ? 360 : 480

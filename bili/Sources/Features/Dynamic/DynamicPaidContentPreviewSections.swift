@@ -41,10 +41,7 @@ struct DynamicPaidContentCover: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
         }
-        .videoCoverSurface(
-            cornerRadius: style == .large ? 16 : 10,
-            shadowLevel: style == .large ? .control : .regular
-        )
+        .videoCoverSurface(cornerRadius: 0)
     }
 }
 

@@ -37,7 +37,7 @@ struct DynamicArticlePreview: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .clipped()
                 }
-                .videoCoverSurface(cornerRadius: 16, shadowLevel: .control)
+                .videoCoverSurface(cornerRadius: 0)
             }
             Text(article.title).font(.headline).foregroundStyle(.primary).lineLimit(2)
             if let summary = article.summary, summary != article.title {

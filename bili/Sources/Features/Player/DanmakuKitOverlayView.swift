@@ -184,7 +184,13 @@ final class DanmakuKitOverlayView: UIView {
             return
         }
 
-        let jumped = hasPlaybackAnchor
+        // 纯倍速变化不是 seek：倍速切换前后，时钟刷新节奏（0.9 秒）与视频前进速度
+        //（2 倍速下 0.9 秒走 1.8 秒视频时间）叠加，currentTime 与弹幕锚点时间的差值
+        // 易超 seekJumpThreshold，被误判成一次 seek 跳变 → rebuildVisibleItems 清屏，
+        // 弹幕消失再重现。倍速变了、时间连续时强制不清场，只补新弹幕，飞行中的弹幕
+        // 按新倍速继续往前（renderer.playingSpeed 已在 configurePlaybackRate 里更新）。
+        let rateChanged = abs(previousPlaybackRate - playbackRate) > 0.001
+        let jumped = !rateChanged && hasPlaybackAnchor
             && (currentTime + 0.2 < previousEffectiveTime
                 || (clockAdvanced && abs(currentTime - previousEffectiveTime) > seekJumpThreshold))
         if preservesStage {

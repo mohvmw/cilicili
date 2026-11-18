@@ -86,7 +86,6 @@ private struct FollowedLiveAvatarPlaceholder: View {
     var body: some View {
         VStack(spacing: 5) {
             SkeletonBlock(width: 48, height: 48, shape: .circle)
-                .mediaShadow(.regular)
 
             SkeletonBlock(width: 42, height: 10, shape: .capsule)
         }
@@ -114,7 +113,6 @@ private struct FollowedLiveAvatar: View {
                     Circle()
                         .stroke(appTintColor.opacity(0.72), lineWidth: 1.5)
                 }
-                .mediaShadow(.regular)
 
                 if item.isLive {
                     Text("直播中")

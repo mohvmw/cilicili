@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 enum VideoDetailPlaybackQualityMenuBuilder {
     static func inlineQualityButtonTitle(selectedPlayVariant: PlayVariant?) -> String {
@@ -25,8 +26,15 @@ enum VideoDetailPlaybackQualityMenuBuilder {
         // sheet 共用这份顺序；去重后按 qn 码降序，不动全局 sortedPlayVariants
         //（它还管默认选档/节能选档，改它风险大）。选中态按 quality 匹配，
         // 不按下标，排序不影响。
-        compactQualityVariants(from: playVariants)
+        let sortedVariants = compactQualityVariants(from: playVariants)
             .sorted { $0.quality > $1.quality }
+        #if DEBUG
+        // 诊断：确认 store 里实际的清晰度顺序（若日志是降序而屏幕仍升序，
+        // 则是 SwiftUI List 差分问题，需在 sheet 侧改用显式 .id 强制重建）。
+        let orderDescription = sortedVariants.map { "\($0.quality):\($0.qualityMenuTitle)" }.joined(separator: ", ")
+        PlayerMetricsLog.logger.debug("qualityMenu order: \(orderDescription, privacy: .public)")
+        #endif
+        return sortedVariants
             .map { variant in
             let systemImage: String
             if !variant.isPlayable {

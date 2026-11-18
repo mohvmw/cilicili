@@ -43,16 +43,11 @@ final class DanmakuKitTextCellModel: DanmakuCellModel {
             blue: CGFloat(item.color & 0xFF) / 255,
             alpha: CGFloat(min(max(opacity, 0.25), 1))
         )
-        let textShadow = NSShadow()
-        textShadow.shadowColor = UIColor.black.withAlphaComponent(min(max(opacity * 0.86, 0.25), 0.9))
-        textShadow.shadowOffset = CGSize(width: 0, height: 1)
-        textShadow.shadowBlurRadius = 1.4
         let rendered = Self.render(
             item.text,
             emotes: item.inlineEmotes,
             font: uiFont,
-            color: color,
-            shadow: textShadow
+            color: color
         )
         attributedText = rendered.attributedText
         missingEmoteURLs = rendered.missingImageURLs
@@ -78,13 +73,17 @@ final class DanmakuKitTextCellModel: DanmakuCellModel {
         _ text: String,
         emotes: [String: BiliInlineEmote],
         font: UIFont,
-        color: UIColor,
-        shadow: NSShadow
+        color: UIColor
     ) -> (attributedText: NSAttributedString, missingImageURLs: [URL]) {
+        // 弹幕字体改黑边框（描边）代替阴影：strokeWidth 为负表示“描边 + 填充”，
+        // 正值会只剩空心描边。描边宽按字号缩放，最小 2pt。Metal 后端本来就是
+        // 黑边框，改完三后端观感一致。
+        let strokeWidth = -max(2.0, font.pointSize * 0.08)
         let baseAttributes: [NSAttributedString.Key: Any] = [
             .font: font,
             .foregroundColor: color,
-            .shadow: shadow
+            .strokeColor: UIColor.black,
+            .strokeWidth: strokeWidth
         ]
         guard !text.isEmpty, !emotes.isEmpty else {
             return (NSAttributedString(string: text, attributes: baseAttributes), [])
@@ -106,7 +105,6 @@ final class DanmakuKitTextCellModel: DanmakuCellModel {
                     token: String(text[match.range]),
                     font: font,
                     color: color,
-                    shadow: shadow,
                     missingImageURLs: &missingImageURLs
                 )
             )
@@ -172,15 +170,22 @@ final class DanmakuKitTextCellModel: DanmakuCellModel {
         token: String,
         font: UIFont,
         color: UIColor,
-        shadow: NSShadow,
         missingImageURLs: inout [URL]
     ) -> NSAttributedString {
+        // 表情 token 与附件统一用黑描边（与正文一致），不再用阴影。
+        let strokeWidth = -max(2.0, font.pointSize * 0.08)
+        let strokeAttributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: color,
+            .strokeColor: UIColor.black,
+            .strokeWidth: strokeWidth
+        ]
         guard let urlString = emote.displayURL,
               let url = URL(string: urlString)
         else {
             return NSAttributedString(
                 string: token,
-                attributes: [.font: font, .foregroundColor: color, .shadow: shadow]
+                attributes: strokeAttributes
             )
         }
 
@@ -206,7 +211,7 @@ final class DanmakuKitTextCellModel: DanmakuCellModel {
         )
         let result = NSMutableAttributedString(attachment: attachment)
         result.addAttributes(
-            [.font: font, .foregroundColor: color, .shadow: shadow],
+            strokeAttributes,
             range: NSRange(location: 0, length: result.length)
         )
         return result

@@ -15,7 +15,7 @@ enum VideoDetailRelatedStyle {
     static let maximumCoverWidth: CGFloat = 160
     static let coverAspectRatio: CGFloat = 9 / 16
     static let dividerSpacingAfterCover: CGFloat = 10
-    static let coverCornerRadius: CGFloat = 10
+    static let coverCornerRadius: CGFloat = 0
     static let rowTitleMinHeight: CGFloat = 36
     static let standardCoverMaximumPixelLength = 480
     static let conservativeCoverMaximumPixelLength = 360

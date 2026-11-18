@@ -532,8 +532,9 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
     private var prefersNativePlaybackControls = true
     private var timeObserver: Timer?
     /// 网速采样基线：上次采样时的累计下载字节数与时间。
-    private var lastNetworkSpeedSampleBytes: Int?
     private var lastNetworkSpeedSampleDate: Date?
+    /// 最近 5 秒的网速采样点（时间，累计已服务字节数），速度 = 窗口内字节差 / 窗口时长。
+    private var networkSpeedSamples: [(date: Date, bytes: Int)] = []
     private var didApplyResumeTime = false
     private var mediaPreparationTask: Task<Void, Never>?
     private var mediaPreparationGeneration = 0
@@ -6508,18 +6509,21 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
            now.timeIntervalSince(lastDate) < 1.0 {
             return
         }
-        let bytes = engine.remoteDownloadSnapshot().bytes
-        defer {
-            lastNetworkSpeedSampleBytes = bytes
-            lastNetworkSpeedSampleDate = now
+        lastNetworkSpeedSampleDate = now
+        // 数据源：代理已发给播放器的字节总量（缓存命中 + 远端拉取）。remoteDownloadSnapshot
+        // 的 bytes 只计远端拉取，512MB 磁盘缓存命中时不涨，网速恒为 0。
+        // 滚动平均：分片是突发式下载（几秒一个、几百毫秒下完），1 秒单点差量大半窗口
+        // 没有下载、显示 0；用最近 5 秒窗口内的字节差 / 窗口时长平滑。
+        networkSpeedSamples.append((date: now, bytes: engine.servedBytesSnapshot()))
+        networkSpeedSamples.removeAll { now.timeIntervalSince($0.date) > 5.0 }
+        guard networkSpeedSamples.count >= 2,
+              let oldest = networkSpeedSamples.first,
+              let newest = networkSpeedSamples.last else {
+            return
         }
-        guard let lastBytes = lastNetworkSpeedSampleBytes,
-              let lastDate = lastNetworkSpeedSampleDate else {
-            return // 第一次采样只有基线，没有差量
-        }
-        let interval = now.timeIntervalSince(lastDate)
-        guard interval > 0 else { return }
-        let bytesPerSecond = Double(max(bytes - lastBytes, 0)) / interval
+        let span = newest.date.timeIntervalSince(oldest.date)
+        guard span >= 1.0 else { return }
+        let bytesPerSecond = Double(max(newest.bytes - oldest.bytes, 0)) / span
         if isPlaying || isBuffering {
             networkSpeedModel.speedText = Self.formatNetworkSpeed(bytesPerSecond: bytesPerSecond)
         } else {

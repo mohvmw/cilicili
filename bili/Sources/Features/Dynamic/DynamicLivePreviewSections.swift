@@ -47,7 +47,7 @@ struct DynamicLiveCover: View {
             }
         }
         .background(BiliMediaPlaceholder(style: .video, iconSize: 17))
-        .videoCoverSurface(cornerRadius: 12, shadowLevel: .regular)
+        .videoCoverSurface(cornerRadius: 0)
     }
 }
 

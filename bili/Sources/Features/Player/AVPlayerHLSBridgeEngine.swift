@@ -4145,6 +4145,11 @@ struct LocalHLSBridge: Sendable {
         return (snapshot.bytes, snapshot.active, snapshot.peak)
     }
 
+    /// 已发给播放器的数据总量（缓存命中 + 远端拉取），左上角实时网速的采样源。
+    nonisolated func servedBytesSnapshot() -> Int {
+        server.downloadStats.snapshot().servedBytes
+    }
+
     nonisolated func withCacheDiagnostics(routePlanState: String, serverState: String) -> LocalHLSBridge {
         LocalHLSBridge(
             masterPlaylistURL: masterPlaylistURL,
@@ -8138,12 +8143,14 @@ nonisolated private final class LocalHLSProxyServer: @unchecked Sendable {
     nonisolated final class RemoteDownloadStats: @unchecked Sendable {
         struct Snapshot {
             let bytes: Int
+            let servedBytes: Int
             let active: Int
             let peak: Int
         }
 
         private struct State {
             var bytes = 0
+            var servedBytes = 0
             var active = 0
             var peak = 0
         }
@@ -8161,11 +8168,21 @@ nonisolated private final class LocalHLSProxyServer: @unchecked Sendable {
             lock.withLock {
                 $0.active = max(0, $0.active - 1)
                 $0.bytes += max(bytes, 0)
+                // 远端拉取的分片同样发给了播放器，一并计入已服务字节数。
+                $0.servedBytes += max(bytes, 0)
+            }
+        }
+
+        /// 已发给播放器的数据量（缓存命中 + 远端拉取都计）。左上角实时网速的
+        /// 数据源：bytes 只计远端拉取，512MB 磁盘缓存命中时不涨，网速恒为 0。
+        nonisolated func served(bytes: Int) {
+            lock.withLock {
+                $0.servedBytes += max(bytes, 0)
             }
         }
 
         nonisolated func snapshot() -> Snapshot {
-            lock.withLock { Snapshot(bytes: $0.bytes, active: $0.active, peak: $0.peak) }
+            lock.withLock { Snapshot(bytes: $0.bytes, servedBytes: $0.servedBytes, active: $0.active, peak: $0.peak) }
         }
     }
 
@@ -8511,6 +8528,8 @@ nonisolated private final class LocalHLSProxyServer: @unchecked Sendable {
             recoveryScope.event(recoveryTicket, "rangeComplete", source: "cache", bytes: cached.count)
             #endif
             let responseData = responseData(from: cached, servedRange: resolvedRange, transform: transform)
+            // 网速口径：缓存命中也发给了播放器，计入已服务字节数（否则缓存播放时网速恒为 0）。
+            downloadStats.served(bytes: responseData.count)
             let elapsedMilliseconds = PlayerMetricsLog.elapsedMilliseconds(since: start)
             PlayerMetricsLog.logger.info(
                 "hlsProxyRangeCacheHit path=\(request.path, privacy: .public) bytes=\(responseData.count, privacy: .public) elapsedMs=\(elapsedMilliseconds, format: .fixed(precision: 1), privacy: .public)"

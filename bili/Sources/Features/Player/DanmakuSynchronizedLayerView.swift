@@ -193,6 +193,8 @@ final class DanmakuSynchronizedLayerView: UIView, DanmakuOverlayRendering {
     // MARK: Configuration state
 
     private var configuration: DanmakuOverlayConfiguration?
+    /// 上次同步时看到的倍速。纯倍速变化时不触发重同步（见 synchronizePlaybackTime）。
+    private var lastPlaybackRateForSync: Double = 1.0
     private var layoutParameters: SyncLayoutParameters?
     private var viewportWidth: CGFloat { max(bounds.width, 1) }
 
@@ -367,6 +369,14 @@ final class DanmakuSynchronizedLayerView: UIView, DanmakuOverlayRendering {
 
     func synchronizePlaybackTime(_ time: TimeInterval, force: Bool) {
         guard synchronizedLayer != nil else { return }
+        // 纯倍速变化不是 seek：倍速切换后，时钟（0.05 秒去重订阅）与播放器媒体时间
+        // 短暂脱节，差值易超 1.25 秒阈值，误触发 resynchronizePresentation → 回收
+        // 全部在飞弹幕。AVSynchronizedLayer 的时间基跟随播放器倍速，飞行弹幕会
+        // 自动加速，无需重建；只跳过倍速刚变的那一次同步，之后恢复正常阈值判断。
+        let currentRate = configuration?.playbackRate ?? 1.0
+        let rateChanged = abs(currentRate - lastPlaybackRateForSync) > 0.001
+        lastPlaybackRateForSync = currentRate
+        if rateChanged && !force { return }
         let mediaTime = resolvedPlaybackTime()
         guard force || abs(mediaTime - time) > Self.seekResyncThreshold else { return }
         resynchronizePresentation(at: mediaTime)
@@ -976,16 +986,11 @@ final class DanmakuSynchronizedLayerView: UIView, DanmakuOverlayRendering {
             blue: CGFloat(item.color & 0xFF) / 255,
             alpha: 1
         )
-        let textShadow = NSShadow()
-        textShadow.shadowColor = UIColor.black.withAlphaComponent(0.86)
-        textShadow.shadowOffset = CGSize(width: 0, height: 1)
-        textShadow.shadowBlurRadius = 1.4
         let rendered = DanmakuKitTextCellModel.render(
             item.text,
             emotes: item.inlineEmotes,
             font: font,
-            color: color,
-            shadow: textShadow
+            color: color
         )
         let textSize = rendered.attributedText.boundingRect(
             with: CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude),

@@ -61,6 +61,7 @@ private struct VideoDetailRelatedRow: View, Equatable {
             coverSize: coverSize,
             coverMaximumPixelLength: coverMaximumPixelLength,
             coverCornerRadius: VideoDetailRelatedStyle.coverCornerRadius,
+            showsCoverShadow: false,
             titleMinHeight: VideoDetailRelatedStyle.rowTitleMinHeight,
             authorStyle: .plain,
             metadataStyle: .related

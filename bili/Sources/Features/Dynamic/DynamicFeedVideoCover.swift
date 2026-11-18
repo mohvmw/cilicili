@@ -1,7 +1,8 @@
 import SwiftUI
 
 enum DynamicFeedMediaMetrics {
-    static let coverCornerRadius: CGFloat = 20
+    // 动态页视频封面与多图网格外角：与首页一致，改直角（原 20）。
+    static let coverCornerRadius: CGFloat = 0
 }
 
 struct DynamicFeedVideoCover: View {
@@ -38,6 +39,7 @@ struct DynamicFeedVideoCover: View {
                 }
             }
         }
-        .videoCoverSurface(cornerRadius: DynamicFeedMediaMetrics.coverCornerRadius, shadowLevel: .control)
+        // 120Hz：封面阴影要离屏渲染，首次渲染贵；与首页一致去掉阴影，只留描边。
+        .videoCoverSurface(cornerRadius: DynamicFeedMediaMetrics.coverCornerRadius)
     }
 }

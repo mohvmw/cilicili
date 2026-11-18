@@ -20,7 +20,9 @@ extension VideoDetailViewModel {
 
         let selectedVariant = preferredDefaultVariant(in: variants)
         let targetVariant = selectedVariant
-        playVariants = variants
+        // 清晰度数据源头钉死降序：任何显示路径拿到的都是上大下小。默认选档走
+        // sortedPlayVariants（自己会重排，不受此影响）。
+        playVariants = variants.sorted { $0.quality > $1.quality }
         selectedPlayVariant = selectedVariant
         logSelectedPlayVariant(selectedVariant, availableVariants: variants, source: source)
         #if DEBUG

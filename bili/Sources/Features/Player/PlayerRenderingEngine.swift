@@ -500,8 +500,10 @@ protocol PlayerRenderingEngine: AnyObject, Sendable {
     func seekAfterUserScrub(toProgress progress: Double, duration: TimeInterval?) async -> TimeInterval?
     func snapshot(durationHint: TimeInterval?) -> PlayerPlaybackSnapshot
     /// 本地 HLS 代理的下载统计：累计下载字节数 / 当前并发 / 峰值并发。
-    /// 实时网速用累计字节数的每秒差量算。默认返回 0（UI 测试引擎无代理）。
+    /// bytes 只计远端拉取（缓存命中不计），供卡顿监测用；实时网速请用 servedBytesSnapshot。
     func remoteDownloadSnapshot() -> (bytes: Int, active: Int, peak: Int)
+    /// 已发给播放器的数据总量（缓存命中 + 远端拉取），左上角实时网速的采样源。
+    func servedBytesSnapshot() -> Int
     func recoveryBufferSnapshot() -> PlayerPlaybackSnapshot?
     func currentRenderedVideoTime() -> TimeInterval?
     func currentVideoFrameImage() -> UIImage?
@@ -516,6 +518,8 @@ extension PlayerRenderingEngine {
     func recoveryBufferSnapshot() -> PlayerPlaybackSnapshot? { nil }
 
     func remoteDownloadSnapshot() -> (bytes: Int, active: Int, peak: Int) { (0, 0, 0) }
+
+    func servedBytesSnapshot() -> Int { 0 }
 
     var danmakuSyncPlayer: AVPlayer? { nil }
 

@@ -16,6 +16,7 @@ struct VideoCompactListRow: View, Equatable {
     var coverMaximumPixelLength: Int = 1280
     var coverCornerRadius: CGFloat = 10
     var showsCoverBorder = false
+    var showsCoverShadow = true
     var titleMinHeight: CGFloat = 36
     var authorStyle: AuthorStyle = .plain
     var metadataStyle: MetadataStyle = .related
@@ -26,6 +27,7 @@ struct VideoCompactListRow: View, Equatable {
             && lhs.coverMaximumPixelLength == rhs.coverMaximumPixelLength
             && lhs.coverCornerRadius == rhs.coverCornerRadius
             && lhs.showsCoverBorder == rhs.showsCoverBorder
+            && lhs.showsCoverShadow == rhs.showsCoverShadow
             && lhs.titleMinHeight == rhs.titleMinHeight
             && lhs.authorStyle == rhs.authorStyle
             && lhs.metadataStyle == rhs.metadataStyle
@@ -38,7 +40,8 @@ struct VideoCompactListRow: View, Equatable {
                 size: coverSize,
                 maximumPixelLength: coverMaximumPixelLength,
                 cornerRadius: coverCornerRadius,
-                showsBorder: showsCoverBorder
+                showsBorder: showsCoverBorder,
+                showsShadow: showsCoverShadow
             )
 
             VideoCompactListTextColumn(

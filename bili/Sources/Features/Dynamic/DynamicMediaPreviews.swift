@@ -66,10 +66,10 @@ struct DynamicOriginalPreview: View {
                 .padding(.leading, 6)
         }
         .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: 0, style: .continuous)
                 .stroke(Color(.separator).opacity(0.10), lineWidth: 0.5)
         }
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 0, style: .continuous))
         .dynamicDetailTapAction(
             onOpenDetail,
             identifier: "dynamic.feed.originalDetailTapArea.\(parentID).\(item.idStr)",

@@ -98,7 +98,7 @@ private struct DynamicPGCPreview: View {
                 }
             }
         }
-        .videoCoverSurface(cornerRadius: compact ? 8 : 16, shadowLevel: .control)
+        .videoCoverSurface(cornerRadius: 0)
     }
 
     private var details: some View {

@@ -36,7 +36,6 @@ struct DynamicFeedAuthorHeader: View {
             }
             .frame(width: 36, height: 36)
             .clipShape(Circle())
-            .mediaShadow(.subtle)
 
             Text(authorName)
                 .appTypography(.author, fallback: .subheadline.weight(.semibold))

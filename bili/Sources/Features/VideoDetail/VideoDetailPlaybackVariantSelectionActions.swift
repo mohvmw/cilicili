@@ -79,7 +79,8 @@ extension VideoDetailViewModel {
 
                 self.currentPlayURLData = mergedData
                 self.applyVideoListenAudioVariants(from: mergedData)
-                self.playVariants = mergedVariants
+                // 同上：补档合并后也按 qn 码降序钉死。
+                self.playVariants = mergedVariants.sorted { $0.quality > $1.quality }
                 PlayerMetricsLog.record(
                     .qualitySupplement,
                     metricsID: bvid,
