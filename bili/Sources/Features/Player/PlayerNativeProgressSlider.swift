@@ -77,6 +77,18 @@ struct PlayerNativeProgressSlider: View {
                 .fill(style == .telegram ? Color.clear : Color.white.opacity(0.28))
                 .frame(width: width, height: trackHeight)
 
+            // 缓存条：浅色，已缓存到的位置（底轨之上、已播之下）。拖动时不动，
+            // 只跟 clock.bufferedProgress 走；已播的 0.96 白会盖住它，三段分明。
+            if style == .telegram {
+                Rectangle()
+                    .fill(.white.opacity(0.5))
+                    .frame(width: width * CGFloat(clock.bufferedProgress), height: trackHeight)
+            } else {
+                Capsule()
+                    .fill(.white.opacity(0.5))
+                    .frame(width: width * CGFloat(clock.bufferedProgress), height: trackHeight)
+            }
+
             if style == .telegram {
                 Rectangle()
                     .fill(.white)

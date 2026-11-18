@@ -141,7 +141,12 @@ private struct VideoDetailInlineQualityMenuButton: UIViewRepresentable {
         }
 
         func makeMenu() -> UIMenu {
-            let actions = store.qualityMenuItems.map { item in
+            // 全屏横屏的清晰度必须上大下小：这里再按 qn 码降序排一次，
+            // 保证菜单显示顺序不依赖上游 store 的顺序（builder 里已排过，
+            // 这里是兜底，排过序的数组再排一次是 no-op）。
+            let actions = store.qualityMenuItems
+                .sorted { $0.variant.quality > $1.variant.quality }
+                .map { item in
                 UIAction(
                     title: item.title,
                     image: UIImage(systemName: item.systemImage),
@@ -221,7 +226,8 @@ struct VideoDetailQuickQualitySelectionSheet: View {
                     .listRowBackground(Color.clear)
                 }
 
-                ForEach(store.qualityMenuItems) { item in
+                // 清晰度上大下小：按 qn 码降序排（builder 里已排过，这里是兜底）。
+                ForEach(store.qualityMenuItems.sorted { $0.variant.quality > $1.variant.quality }) { item in
                     VideoDetailQuickQualitySelectionRow(item: item) {
                         guard let currentItem = store.qualityMenuItems.first(where: { $0.id == item.id }),
                               !currentItem.isDisabled

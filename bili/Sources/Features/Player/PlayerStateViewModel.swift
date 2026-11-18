@@ -339,6 +339,9 @@ final class PlayerPlaybackClock: ObservableObject {
     @Published private(set) var currentTime: TimeInterval = 0
     @Published private(set) var duration: TimeInterval?
     @Published private(set) var seekPreviewProgress: Double?
+    /// 已缓存进度（0~1）：从当前播放点起连续缓存到的位置占总时长比例，
+    /// 进度条上的浅色缓存条用它画。由 viewModel 从快照的 bufferedRanges 算出。
+    @Published private(set) var bufferedProgress: Double = 0
 
     var progress: Double {
         guard let duration, duration > 0 else { return 0 }
@@ -356,7 +359,7 @@ final class PlayerPlaybackClock: ObservableObject {
         return min(max(seekPreviewProgress, 0), 1) * duration
     }
 
-    func update(time: TimeInterval? = nil, duration: TimeInterval? = nil, force: Bool = false) {
+    func update(time: TimeInterval? = nil, duration: TimeInterval? = nil, bufferedProgress: Double? = nil, force: Bool = false) {
         let nextTime = max(time ?? currentTime, 0)
         let nextDuration = duration
         let durationChanged: Bool
@@ -372,12 +375,20 @@ final class PlayerPlaybackClock: ObservableObject {
         if force || abs(currentTime - nextTime) >= 0.2 || (currentTime <= 0 && nextTime > 0) {
             currentTime = nextTime
         }
+        if let bufferedProgress {
+            // 缓存条变化慢，0.01 的死带避免无谓重绘。
+            let clamped = min(max(bufferedProgress, 0), 1)
+            if force || abs(self.bufferedProgress - clamped) >= 0.01 {
+                self.bufferedProgress = clamped
+            }
+        }
     }
 
     func reset() {
         currentTime = 0
         duration = nil
         seekPreviewProgress = nil
+        bufferedProgress = 0
     }
 
     func updateSeekPreview(progress: Double, force: Bool = false) {
@@ -389,6 +400,13 @@ final class PlayerPlaybackClock: ObservableObject {
     func clearSeekPreview() {
         seekPreviewProgress = nil
     }
+}
+
+/// 实时网速（播放界面左上角常驻显示）。viewModel 每秒采样本地 HLS 代理的累计
+/// 下载字节数算出速度后写 speedText；overlay 层直接观察它，不依赖父 view 的
+/// 重绘节奏。nil 时隐藏（暂停且无下载时）。
+final class PlayerNetworkSpeedModel: ObservableObject {
+    @Published var speedText: String?
 }
 
 @MainActor
@@ -443,6 +461,10 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
     @Published var playbackRate: BiliPlaybackRate = .x10
     @Published var isPreparing = true
     @Published var isBuffering = false
+    /// 实时网速模型（左上角常驻显示用）。viewModel 每秒采样本地代理算出速度后写
+    /// networkSpeedModel.speedText；overlay 层直接观察该模型，不依赖父 view 的
+    /// 重绘节奏，保证每秒刷新。暂停且无下载时 speedText 为 nil（隐藏）。
+    let networkSpeedModel = PlayerNetworkSpeedModel()
     @Published var errorMessage: String?
     @Published var isPictureInPictureActive = false
     @Published private(set) var isPictureInPictureEnabled = false
@@ -509,6 +531,9 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
     private weak var nativePlaybackController: AVPlayerViewController?
     private var prefersNativePlaybackControls = true
     private var timeObserver: Timer?
+    /// 网速采样基线：上次采样时的累计下载字节数与时间。
+    private var lastNetworkSpeedSampleBytes: Int?
+    private var lastNetworkSpeedSampleDate: Date?
     private var didApplyResumeTime = false
     private var mediaPreparationTask: Task<Void, Never>?
     private var mediaPreparationGeneration = 0
@@ -4848,6 +4873,8 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
             recordManualResumeTransportPlaying(at: CACurrentMediaTime())
         }
         updateSeekBufferProgressIfNeeded(snapshot)
+        updateBufferedProgressIfNeeded(snapshot)
+        sampleNetworkSpeedIfNeeded()
         var acceptedSnapshotTime: TimeInterval?
         if let snapshotTime = snapshot.currentTime,
            updatePlaybackTime(snapshotTime) {
@@ -6434,6 +6461,78 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
             title: title,
             message: "bufferReady reason=\(pending.reason) target=\(String(format: "%.2fs", targetTime)) coverage=\(String(format: "%.0f%%", coverage * 100))"
         )
+    }
+
+    /// 进度条缓存条：从快照的已缓存区间算“从当前点起连续缓存到的位置”占总时长比例，
+    /// 发到 playbackClock.bufferedProgress，进度条画浅色条。与 YouTube 的浅灰缓存条
+    /// 同款做法：只显示连续的一段，不画多段碎片（HLS 经常多段，画多段会很碎）。
+    private func updateBufferedProgressIfNeeded(_ snapshot: PlayerPlaybackSnapshot) {
+        guard let duration = snapshot.duration ?? self.duration, duration > 0 else { return }
+        let currentTime = snapshot.currentTime ?? self.currentTime
+        playbackClock.update(bufferedProgress: Self.bufferedProgress(
+            from: snapshot.bufferedRanges,
+            currentTime: currentTime,
+            duration: duration
+        ))
+    }
+
+    private static func bufferedProgress(
+        from ranges: [PlayerBufferedRange],
+        currentTime: TimeInterval,
+        duration: TimeInterval
+    ) -> Double {
+        guard duration > 0 else { return 0 }
+        let sorted = ranges.sorted { $0.start < $1.start }
+        let tolerance: TimeInterval = 0.5
+        guard let index = sorted.firstIndex(where: { range in
+            range.start - tolerance <= currentTime && currentTime <= range.end + tolerance
+        }) else {
+            // 当前点不在任何已缓存区间里（比如刚 seek 还没开始下）：缓存条最多到播放头。
+            return min(max(currentTime / duration, 0), 1)
+        }
+        var end = max(sorted[index].end, currentTime)
+        for range in sorted[(index + 1)...] {
+            guard range.start <= end + tolerance else { break }
+            end = max(end, range.end)
+        }
+        return min(max(end / duration, 0), 1)
+    }
+
+    /// 实时网速：每秒采样一次本地 HLS 代理的累计下载字节数，差量除以实际间隔即速度。
+    /// 采样挂在 refreshPlaybackState 里（已有定时器，无需另起 Timer 管生命周期），
+    /// 用实际间隔换算，所以刷新间隔不固定（缓冲 0.35s、正常 1.2s）也不影响准确性。
+    /// 只在播放/缓冲时显示；暂停且无下载时隐藏，避免常驻“0 KB/s”。
+    private func sampleNetworkSpeedIfNeeded() {
+        let now = Date()
+        if let lastDate = lastNetworkSpeedSampleDate,
+           now.timeIntervalSince(lastDate) < 1.0 {
+            return
+        }
+        let bytes = engine.remoteDownloadSnapshot().bytes
+        defer {
+            lastNetworkSpeedSampleBytes = bytes
+            lastNetworkSpeedSampleDate = now
+        }
+        guard let lastBytes = lastNetworkSpeedSampleBytes,
+              let lastDate = lastNetworkSpeedSampleDate else {
+            return // 第一次采样只有基线，没有差量
+        }
+        let interval = now.timeIntervalSince(lastDate)
+        guard interval > 0 else { return }
+        let bytesPerSecond = Double(max(bytes - lastBytes, 0)) / interval
+        if isPlaying || isBuffering {
+            networkSpeedModel.speedText = Self.formatNetworkSpeed(bytesPerSecond: bytesPerSecond)
+        } else {
+            networkSpeedModel.speedText = nil
+        }
+    }
+
+    private static func formatNetworkSpeed(bytesPerSecond: Double) -> String {
+        let kilobytesPerSecond = bytesPerSecond / 1024
+        if kilobytesPerSecond >= 1024 {
+            return String(format: "%.1f MB/s", kilobytesPerSecond / 1024)
+        }
+        return "\(Int(kilobytesPerSecond)) KB/s"
     }
 
     private func skipSponsorBlockSegmentIfNeeded(at time: TimeInterval) {

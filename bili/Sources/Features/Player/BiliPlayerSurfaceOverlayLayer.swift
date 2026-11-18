@@ -6,6 +6,9 @@ struct BiliPlayerSurfaceOverlayLayer: View {
     let state: BiliPlayerSurfaceChromeState
     @ObservedObject var speedBoostModel: PlayerSpeedBoostModel
     @ObservedObject var seekPreviewModel: PlayerSeekPreviewModel
+    /// 实时网速（左上角常驻显示）。视频详情页传 viewModel 的模型；其它入口用默认
+    /// 空模型（speedText 为 nil，不显示）。直接观察模型，每秒刷新，不依赖父 view 重绘。
+    @ObservedObject var networkSpeedModel: PlayerNetworkSpeedModel = PlayerNetworkSpeedModel()
 
     var body: some View {
         ZStack {
@@ -77,6 +80,22 @@ struct BiliPlayerSurfaceOverlayLayer: View {
                     .padding(.top, topAccessoryPadding)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                    .zIndex(6)
+            }
+
+            // 实时网速：常驻左上角，控件隐藏时也不消失（与“正在缓冲”指示不同，
+            // 它是常驻层，allowsHitTesting(false) 不挡手势）。
+            if let speedText = networkSpeedModel.speedText {
+                Label(speedText, systemImage: "arrow.down")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.black.opacity(0.45), in: Capsule())
+                    .padding(.top, topAccessoryPadding)
+                    .padding(.leading, 12)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .transition(.opacity)
                     .zIndex(6)
             }
 

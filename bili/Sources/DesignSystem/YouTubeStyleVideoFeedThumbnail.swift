@@ -35,7 +35,9 @@ struct YouTubeStyleVideoFeedThumbnail: View {
                 .clipped()
             }
             .frame(maxWidth: .infinity)
-            .videoCoverSurface(cornerRadius: 0, shadowLevel: coverShadowLevel)
+            // 120Hz：封面阴影要离屏渲染，首次渲染贵；单列 feed 封面同样去掉阴影，
+            // 只留 0.5pt 描边。coverShadowLevel 保留作配置占位，不再用于渲染。
+            .videoCoverSurface(cornerRadius: 0)
     }
 
     @ViewBuilder

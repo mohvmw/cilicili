@@ -839,7 +839,8 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
                         BiliPlayerSurfaceOverlayLayer(
                             state: chromeState,
                             speedBoostModel: renderContext.speedBoostModel,
-                            seekPreviewModel: renderContext.seekPreviewModel
+                            seekPreviewModel: renderContext.seekPreviewModel,
+                            networkSpeedModel: viewModel.networkSpeedModel
                         )
                             .zIndex(2)
 
@@ -2504,7 +2505,9 @@ private struct SurfaceOnlyLandscapeMoreContent: View {
                 }
 
                 VStack(spacing: 0) {
-                    ForEach(Array(qualityStore.qualityMenuItems.enumerated()), id: \.element.id) { index, item in
+                    // 全屏横屏的清晰度必须上大下小：按 qn 码降序排（builder 里
+                    // 已排过，这里是兜底，保证显示顺序不依赖上游 store 的顺序）。
+                    ForEach(Array(qualityStore.qualityMenuItems.sorted { $0.variant.quality > $1.variant.quality }.enumerated()), id: \.element.id) { index, item in
                         SurfaceOnlyLandscapeMenuRow(
                             title: item.title,
                             subtitle: item.subtitle,
@@ -2938,7 +2941,9 @@ private struct SurfaceOnlyQualityChoicesPage: View {
                     .listRowBackground(Color.clear)
             }
 
-            ForEach(qualityStore.qualityMenuItems) { item in
+            // 全屏横屏的清晰度必须上大下小：按 qn 码降序排（builder 里已排过，
+            // 这里是兜底，保证显示顺序不依赖上游 store 的顺序）。
+            ForEach(qualityStore.qualityMenuItems.sorted { $0.variant.quality > $1.variant.quality }) { item in
                 Button {
                     selectPlayVariant(item.variant)
                     closeSheet()

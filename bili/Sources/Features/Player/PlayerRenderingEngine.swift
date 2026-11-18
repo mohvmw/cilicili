@@ -499,6 +499,9 @@ protocol PlayerRenderingEngine: AnyObject, Sendable {
     func seek(by interval: TimeInterval, from currentTime: TimeInterval, duration: TimeInterval?) -> TimeInterval?
     func seekAfterUserScrub(toProgress progress: Double, duration: TimeInterval?) async -> TimeInterval?
     func snapshot(durationHint: TimeInterval?) -> PlayerPlaybackSnapshot
+    /// 本地 HLS 代理的下载统计：累计下载字节数 / 当前并发 / 峰值并发。
+    /// 实时网速用累计字节数的每秒差量算。默认返回 0（UI 测试引擎无代理）。
+    func remoteDownloadSnapshot() -> (bytes: Int, active: Int, peak: Int)
     func recoveryBufferSnapshot() -> PlayerPlaybackSnapshot?
     func currentRenderedVideoTime() -> TimeInterval?
     func currentVideoFrameImage() -> UIImage?
@@ -511,6 +514,8 @@ protocol PlayerRenderingEngine: AnyObject, Sendable {
 
 extension PlayerRenderingEngine {
     func recoveryBufferSnapshot() -> PlayerPlaybackSnapshot? { nil }
+
+    func remoteDownloadSnapshot() -> (bytes: Int, active: Int, peak: Int) { (0, 0, 0) }
 
     var danmakuSyncPlayer: AVPlayer? { nil }
 

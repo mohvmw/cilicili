@@ -41,7 +41,9 @@ struct VideoCardBlendedBody<Cover: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             cover
-                .videoCoverSurface(cornerRadius: 0, shadowLevel: .control)
+                // 120Hz：封面阴影要离屏渲染一次（每卡多 3–4 个图层），首次渲染贵；
+                // 官方 B 站 feed 封面本就无阴影，只留 0.5pt 描边。
+                .videoCoverSurface(cornerRadius: 0)
 
             VideoCardTextStack(
                 display: display,

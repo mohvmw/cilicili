@@ -57,7 +57,6 @@ struct VideoCardTextStack: View {
             }
             .frame(width: 14, height: 14)
             .clipShape(Circle())
-            .mediaShadow(.subtle)
         }
     }
 }

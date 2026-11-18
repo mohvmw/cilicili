@@ -162,16 +162,12 @@ private struct VideoCoverBadgeBackgroundModifier<BadgeShape: InsettableShape>: V
 
     @ViewBuilder
     func body(content: Content) -> some View {
-        switch style {
-        case .clear:
-            content
-                .videoCoverReadableBacking(style: style, in: shape)
-                .biliPlayerClearGlass(interactive: false, in: shape)
-        case .regular:
-            content
-                .videoCoverReadableBacking(style: style, in: shape)
-                .biliRegularGlassEffect(in: shape)
-        }
+        // 120Hz：角标玻璃（.clear / .regular）每帧要重采样背景，约 8 个可见封面
+        // × 2 = 16 次玻璃采样/帧，是滚动逐帧合成里最贵的一项。videoCoverReadableBacking
+        // 本身已是黑色实心底（+ 0.5pt 白描边），可读性足够，玻璃只是质感，删掉它
+        // 改回纯色底（官方 B 站就是黑色半透明 pill），滚动不再逐帧采样背景。
+        content
+            .videoCoverReadableBacking(style: style, in: shape)
     }
 }
 
