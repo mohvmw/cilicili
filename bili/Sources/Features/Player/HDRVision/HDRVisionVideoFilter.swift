@@ -156,8 +156,9 @@ enum HDRVisionVideoFilter {
 
     /// 与脚本 `computeUniformData` 相同的 uniform 计算（32 个 float 的子集，
     /// 只保留内核实际用到的 19 个；顺序与内核参数声明一致）。
-    /// nonisolated：applyKernel（nonisolated）里调用它；纯计算。
-    nonisolated private static func computeUniforms(_ settings: HDRVisionSettings) -> [Float] {
+    /// nonisolated：applyKernel（nonisolated）与计算核显示里调用它；纯计算。
+    /// 不加 private：计算核显示（HDRVisionVideoOutputDisplay）也要用同一组 uniform。
+    nonisolated static func computeUniforms(_ settings: HDRVisionSettings) -> [Float] {
         let isBT = settings.mappingMode == .bt2446a
         let exposureMultiplier = Float(pow(2.0, settings.activeExposure))
         let saturation = Float(settings.activeSaturation)

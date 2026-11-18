@@ -615,7 +615,10 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
             HDRVisionVideoFilter.setLastApplyStatus("等待就绪…")
             return
         }
-        hdrDisplay.setActive(true, videoSize: presentationSize, gravity: videoGravity)
+        guard hdrDisplay.setActive(true, videoSize: presentationSize, gravity: videoGravity) else {
+            // 计算核没就绪时 setActive 已把状态写成“计算核未加载”，这里不再覆盖。
+            return
+        }
         // 启动时同步一次播放层实际的视频矩形（布局回调也会同步），
         // 让 HDR 画面从第一帧就和关 HDR 时的位置一致。
         if let videoRect = playerLayer?.videoRect {
