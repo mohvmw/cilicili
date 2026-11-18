@@ -48,15 +48,34 @@ final class HDRVisionDisplayView: UIView {
     }
 
     /// 把处理后的画面画到 Metal 层上。非主线程调用无效（由 DisplayLink 在主线程调）。
-    func display(image: CIImage) {
-        guard let commandQueue, let ciContext else { return }
-        guard let drawable = metalLayer.nextDrawable() else { return }
+    /// 返回是否真的把一帧交给了显示层（拿到 drawable 并提交）。
+    /// 注意：调用方不要只按“调过 display”计数——nextDrawable 拿不到或尺寸为 0
+    /// 时这里会提前返回，帧并没有上屏；只有返回 true 才算真正显示了一帧。
+    @discardableResult
+    func display(image: CIImage) -> Bool {
+        // 防御：布局回调还没跑过时 drawableSize 可能是 0，这里按当前 bounds 再算一次。
+        let scale = contentScaleFactor > 0 ? contentScaleFactor : UIScreen.main.scale
+        metalLayer.drawableSize = CGSize(width: bounds.width * scale, height: bounds.height * scale)
+        guard let commandQueue, let ciContext else {
+            HDRVisionVideoFilter.setDisplayLastError("无 Metal 设备/命令队列")
+            return false
+        }
+        guard let drawable = metalLayer.nextDrawable() else {
+            HDRVisionVideoFilter.setDisplayLastError("拿不到 drawable（显示层未进窗口或尺寸为 0）")
+            return false
+        }
         let texture = drawable.texture
         let size = metalLayer.drawableSize
-        guard size.width > 0, size.height > 0 else { return }
+        guard size.width > 0, size.height > 0 else {
+            HDRVisionVideoFilter.setDisplayLastError("drawable 尺寸为 0")
+            return false
+        }
         let bounds = CGRect(origin: .zero, size: CGSize(width: size.width, height: size.height))
         let destRect = Self.destinationRect(videoSize: videoSize, in: bounds.size, gravity: videoGravity)
-        guard let commandBuffer = commandQueue.makeCommandBuffer() else { return }
+        guard let commandBuffer = commandQueue.makeCommandBuffer() else {
+            HDRVisionVideoFilter.setDisplayLastError("建命令缓冲失败")
+            return false
+        }
         let colorSpace = CGColorSpaceCreateDeviceRGB()
         // 先铺黑底（letterbox 黑边），再把处理帧画到目标区域。
         let black = CIImage(color: CIColor(red: 0, green: 0, blue: 0, alpha: 1)).cropped(to: bounds)
@@ -64,6 +83,8 @@ final class HDRVisionDisplayView: UIView {
         ciContext.render(image, to: texture, commandBuffer: commandBuffer, bounds: destRect, colorSpace: colorSpace)
         commandBuffer.present(drawable)
         commandBuffer.commit()
+        HDRVisionVideoFilter.setDisplayLastError(nil)
+        return true
     }
 
     /// 按 videoGravity 算画面在显示区里的目标矩形（像素坐标）。
@@ -155,6 +176,8 @@ final class HDRVisionVideoOutputDisplay {
             guard !isActive else { return }
             isActive = true
             displayView.isHidden = false
+            // 提到最前面：防止播放层或其他子视图后加进来盖住显示层。
+            displayView.superview?.bringSubviewToFront(displayView)
             lastDisplayedItemTime = nil
             let link = CADisplayLink(target: self, selector: #selector(tickDisplayLink))
             link.add(to: .main, forMode: .common)
@@ -190,12 +213,16 @@ final class HDRVisionVideoOutputDisplay {
         let sourceImage = CIImage(cvPixelBuffer: pixelBuffer)
         if let kernel = HDRVisionVideoFilter.kernel,
            let outputImage = HDRVisionVideoFilter.applyKernel(kernel, to: sourceImage, settings: settings) {
-            displayView.display(image: outputImage)
-            HDRVisionVideoFilter.noteFrameProcessed()
+            // 只有真的上屏才算处理帧；display 返回 false（没拿到 drawable 等）
+            // 时不计数，免得数字涨了画面却没变、误导判断。
+            if displayView.display(image: outputImage) {
+                HDRVisionVideoFilter.noteFrameProcessed()
+            }
         } else {
             // 内核没加载或应用失败：原帧直通显示，画面不断。
-            displayView.display(image: sourceImage)
-            HDRVisionVideoFilter.noteFramePassedThrough()
+            if displayView.display(image: sourceImage) {
+                HDRVisionVideoFilter.noteFramePassedThrough()
+            }
         }
     }
 }

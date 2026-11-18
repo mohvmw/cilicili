@@ -71,6 +71,19 @@ enum HDRVisionVideoFilter {
     private static var _lastApplyStatus = "未调用"
     private static var _framesProcessed = 0
     private static var _framesPassedThrough = 0
+    /// 显示层最近一次渲染失败的原因（Metal 层拿不到 drawable、尺寸为 0 等）。
+    /// 为 nil 表示最近一次渲染成功。显示层诊断用：已处理帧涨但画面不变时，
+    /// 看这里就知道帧到底上没上屏。
+    private static var _displayLastError: String?
+
+    /// 显示层最近一次渲染失败的原因，nil 表示最近一次渲染成功。
+    static var displayLastError: String? { statusLock.withLock { _displayLastError } }
+
+    /// 显示层（HDRVisionDisplayView）设置最近一次渲染的结果。
+    /// nonisolated：只写锁保护的变量。
+    nonisolated static func setDisplayLastError(_ message: String?) {
+        statusLock.withLock { _displayLastError = message }
+    }
 
     /// Metal 内核是否加载成功（从 default.metallib）。首次读取会触发加载。
     static var kernelCompiled: Bool { kernel != nil }

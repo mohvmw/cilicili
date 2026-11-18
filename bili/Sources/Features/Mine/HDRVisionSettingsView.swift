@@ -35,6 +35,12 @@ struct HDRVisionSettingsView: View {
                         .foregroundStyle(.secondary)
                 }
                 HStack {
+                    Text("显示层")
+                    Spacer()
+                    Text(HDRVisionVideoFilter.displayLastError ?? "正常")
+                        .foregroundStyle(HDRVisionVideoFilter.displayLastError == nil ? Color.secondary : Color.red)
+                }
+                HStack {
                     Text("已处理帧 / 直通帧")
                     Spacer()
                     Text("\(HDRVisionVideoFilter.frameCounts.processed) / \(HDRVisionVideoFilter.frameCounts.passedThrough)")
