@@ -370,15 +370,18 @@ final class DanmakuSynchronizedLayerView: UIView, DanmakuOverlayRendering {
     func synchronizePlaybackTime(_ time: TimeInterval, force: Bool) {
         guard synchronizedLayer != nil else { return }
         // 纯倍速变化不是 seek：倍速切换后，时钟（0.05 秒去重订阅）与播放器媒体时间
-        // 短暂脱节，差值易超 1.25 秒阈值，误触发 resynchronizePresentation → 回收
-        // 全部在飞弹幕。AVSynchronizedLayer 的时间基跟随播放器倍速，飞行弹幕会
-        // 自动加速，无需重建；只跳过倍速刚变的那一次同步，之后恢复正常阈值判断。
+        // 短暂脱节，差值易超阈值，误触发 resynchronizePresentation → 回收全部在飞
+        // 弹幕。AVSynchronizedLayer 的时间基跟随播放器倍速，飞行弹幕会自动加速，
+        // 无需重建。两层保护：① 倍速刚变跳过一次同步；② 阈值按倍速缩放——2x 下
+        // 时钟滞后可达 1.8 秒，固定 1.25 秒太紧（只跳过一次还依赖 apply 与 tick
+        // 的时序）；真正的 seek 通常远大于 2 秒，仍会被捕获。
         let currentRate = configuration?.playbackRate ?? 1.0
         let rateChanged = abs(currentRate - lastPlaybackRateForSync) > 0.001
         lastPlaybackRateForSync = currentRate
         if rateChanged && !force { return }
         let mediaTime = resolvedPlaybackTime()
-        guard force || abs(mediaTime - time) > Self.seekResyncThreshold else { return }
+        let resyncThreshold = max(Self.seekResyncThreshold, 1.0 * currentRate)
+        guard force || abs(mediaTime - time) > resyncThreshold else { return }
         resynchronizePresentation(at: mediaTime)
     }
 

@@ -76,9 +76,9 @@ final class DanmakuKitTextCellModel: DanmakuCellModel {
         color: UIColor
     ) -> (attributedText: NSAttributedString, missingImageURLs: [URL]) {
         // 弹幕字体改黑边框（描边）代替阴影：strokeWidth 为负表示“描边 + 填充”，
-        // 正值会只剩空心描边。描边宽按字号缩放，最小 2pt。Metal 后端本来就是
-        // 黑边框，改完三后端观感一致。
-        let strokeWidth = -max(2.0, font.pointSize * 0.08)
+        // 正值会只剩空心描边。描边要细（1pt 起，按字号略增），与 Metal 后端的
+        // 1 像素描边观感一致；描边太粗（2pt）会让字体看起来变粗、发胖。
+        let strokeWidth = -max(1.0, font.pointSize * 0.05)
         let baseAttributes: [NSAttributedString.Key: Any] = [
             .font: font,
             .foregroundColor: color,
@@ -173,7 +173,7 @@ final class DanmakuKitTextCellModel: DanmakuCellModel {
         missingImageURLs: inout [URL]
     ) -> NSAttributedString {
         // 表情 token 与附件统一用黑描边（与正文一致），不再用阴影。
-        let strokeWidth = -max(2.0, font.pointSize * 0.08)
+        let strokeWidth = -max(1.0, font.pointSize * 0.05)
         let strokeAttributes: [NSAttributedString.Key: Any] = [
             .font: font,
             .foregroundColor: color,

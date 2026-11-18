@@ -15,6 +15,8 @@ final class DanmakuKitOverlayView: UIView {
     private var lastTimelineTime: TimeInterval?
     private var clearedThroughPlaybackTime: TimeInterval?
     private var playbackRate = 1.0
+    /// 上次同步（synchronizePlaybackTime）时看到的倍速。纯倍速变化时不触发重建。
+    private var lastSynchronizedPlaybackRate: Double = 1.0
     private var isPlaying = false
     private var isEnabled = true
     private var hasPresentedPlayback = false
@@ -247,9 +249,17 @@ final class DanmakuKitOverlayView: UIView {
             lastTimelineTime = playbackTime
             return
         }
+        // 纯倍速变化不是 seek：这是时钟订阅每 tick 都调的同步路径，与 apply 平行，
+        // 上一轮只修了 apply 里的 jumped，这里漏了。倍速一切换，播放器已按新倍速
+        // 走，但 view 里的 playbackRate 只由 apply 更新（异步），锚点按旧倍速推进、
+        // 时钟按新倍速推进，两者差值易超阈值被误判成 seek → rebuild 清屏。长按
+        // 2.0x 松手回 1.0x 时必触发（锚点超前约 0.9 秒，后退容差只有 0.2 秒）。
+        // rateChanged 只屏蔽时间判断，不屏蔽 force（显式重同步请求仍重建）。
+        let rateChanged = abs(playbackRate - lastSynchronizedPlaybackRate) > 0.001
+        lastSynchronizedPlaybackRate = playbackRate
         let jumped = force
-            || sanitizedTime + 0.2 < previousEffectiveTime
-            || (clockAdvanced && abs(sanitizedTime - previousEffectiveTime) > seekJumpThreshold)
+            || (!rateChanged && (sanitizedTime + 0.2 < previousEffectiveTime
+                || (clockAdvanced && abs(sanitizedTime - previousEffectiveTime) > seekJumpThreshold)))
         if jumped {
             clearedThroughPlaybackTime = nil
             rebuildVisibleItems(at: playbackTime, reason: force ? "forced-sync" : "media-jump")

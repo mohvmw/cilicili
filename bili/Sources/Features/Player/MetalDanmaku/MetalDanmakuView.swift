@@ -27,6 +27,8 @@ final class MetalDanmakuView: UIView, DanmakuOverlayRendering, MTKViewDelegate {
     private var anchorTime: TimeInterval = 0
     private var anchorHostTime = CACurrentMediaTime()
     private var lastRawTime: TimeInterval = 0
+    /// 上次同步（synchronizePlaybackTime）时看到的倍速。纯倍速变化时不触发重建。
+    private var lastSynchronizedPlaybackRate: Double = 1.0
     private var stageTransitionActive = false
     private var stageSourceViewport = CGSize.zero
     private var stageTransform = DanmakuStageTransform.identity
@@ -208,7 +210,10 @@ final class MetalDanmakuView: UIView, DanmakuOverlayRendering, MTKViewDelegate {
             layouts.removeAll(keepingCapacity: true)
             configureTimeline()
             rebuild(reason: "canvas-viewport")
-        } else if abs(raw - previousTime) > max(1.25, 0.7 * next.playbackRate) {
+        } else if previous?.playbackRate == next.playbackRate,
+                  abs(raw - previousTime) > max(1.25, 0.7 * next.playbackRate) {
+            // 纯倍速变化不是 seek：倍速切换时锚点已重定（上文），时间差是倍速差造成
+            // 的，不重建；真正的 seek（倍速没变、时间跳变）仍正常重建。
             rebuild(reason: "configuration-time-jump")
         }
         if !shouldRender {
@@ -227,7 +232,12 @@ final class MetalDanmakuView: UIView, DanmakuOverlayRendering, MTKViewDelegate {
         let raw = max(0, time)
         if force || abs(raw - lastRawTime) >= 0.05 { setAnchor(raw) }
         lastRawTime = raw
-        if force || raw + 0.2 < previous || abs(raw - previous) > 1.25 { rebuild(reason: force ? "forced-clock-sync" : "clock-sync-jump") }
+        // 纯倍速变化不是 seek：与 DanmakuKit 同款保护。rateChanged 只屏蔽时间判断，
+        // 不屏蔽 force（显式重同步请求仍重建）。
+        let currentRate = configuration?.playbackRate ?? 1.0
+        let rateChanged = abs(currentRate - lastSynchronizedPlaybackRate) > 0.001
+        lastSynchronizedPlaybackRate = currentRate
+        if force || (!rateChanged && (raw + 0.2 < previous || abs(raw - previous) > 1.25)) { rebuild(reason: force ? "forced-clock-sync" : "clock-sync-jump") }
         updateInstances()
         if configuration?.isPlaying != true { drawOnceIfVisible() }
     }
