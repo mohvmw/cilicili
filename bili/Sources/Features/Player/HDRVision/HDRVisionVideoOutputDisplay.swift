@@ -29,7 +29,12 @@ final class HDRVisionDisplayView: UIView {
         isOpaque = true
         // CIContext 要往纹理里写，framebufferOnly 关掉更稳妥。
         metalLayer.framebufferOnly = false
-        metalLayer.pixelFormat = .bgra8Unorm
+        // EDR 显示（参考 MPlayKit 管线）：BT.2446a 的输出会超过 1.0（峰值
+        // 1.7 左右），8 位 BGRA 会把超 1.0 的高光截到 1.0，永远看不到 HDR
+        // 亮度。改用 16 位浮点纹理 + wantsExtendedDynamicRangeContent，
+        // 超 1.0 的值才能在 XDR 屏上真正亮起来（iOS 按屏幕实际峰值显示）。
+        metalLayer.pixelFormat = .rgba16Float
+        metalLayer.wantsExtendedDynamicRangeContent = true
         metalLayer.contentsScale = UIScreen.main.scale
         isHidden = true
     }
