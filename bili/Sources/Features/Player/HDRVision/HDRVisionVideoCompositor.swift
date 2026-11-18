@@ -5,10 +5,11 @@ import Foundation
 
 /// 自定义视频合成器：把 HDR 视界内核逐帧应用到播放画面上。
 ///
-/// 用它是因为 HLS 桥接素材在 `AVAsset.tracks` 里报 0 条轨道（播放列表已解析、
-/// 时长正常、视频照播），所以基于素材的 `AVVideoComposition` 工厂接口
-///（同步/异步）都建不出合成。手动建合成 + 自定义合成器不依赖素材轨道：
-/// 合成指令里列出候选轨道 ID，合成器收到哪条视频轨的帧就处理哪条。
+/// 【已停用，保留作参考】视频合成路线已死：HLS 桥接素材在 `AVAsset.tracks`
+/// 里报 0 条轨道，合成引擎建不出自定义合成器——旧的 `AVMutableVideoComposition`
+/// 和新的 `AVVideoComposition.Configuration` 都试过，合成器一直“未建”
+///（实测 2026-11-18）。现改走 `AVPlayerItemVideoOutput` 拉帧 + Metal 层显示
+///（`HDRVisionVideoOutputDisplay`），不再挂 videoComposition，本文件不再被调用。
 ///
 /// 轨道 ID 是按经验列的：HLS 主播放列表有多个清晰度分片，AVFoundation
 /// 给视频轨分配的 ID 通常从 1 开始；指令里列 1…8，哪个是当前在播的视频轨，
@@ -59,7 +60,7 @@ final class HDRVisionVideoCompositor: NSObject, AVVideoCompositing {
 
     func renderContextChanged(_ newRenderContext: AVVideoCompositionRenderContext) {
         renderContext = newRenderContext
-        HDRVisionVideoFilter.noteCompositorRenderContextReceived()
+        // 诊断用的“合成器已建”标志已随合成路线一起移除（见文件头）。
     }
 
     func startRequest(_ request: AVAsynchronousVideoCompositionRequest) {

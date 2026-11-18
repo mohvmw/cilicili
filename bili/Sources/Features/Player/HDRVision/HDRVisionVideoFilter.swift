@@ -7,14 +7,15 @@ import os
 /// HDR 视界视频滤镜。
 ///
 /// 把脚本的 WGSL 管线（去色带 → CAS 锐化 → 曝光 → BT.2446a/幂函数映射 → OKLab 饱和度）
-/// 逐句移植为 Core Image Metal 内核，经手动建的 `AVVideoComposition`（Configuration API）+
-/// 自定义合成器（`HDRVisionVideoCompositor`）挂到 `AVPlayerItem` 上。
-/// 注意：iOS 26 上 `AVMutableVideoComposition` 已废弃，播放器不再理会它上面挂的
-/// 自定义合成器（实测合成器一直“未建”），所以改用不可变的 `AVVideoComposition`。
-/// 这是 iOS 上与 mpv `glsl-shaders` 对应的做法：AVPlayer 没有 shader 挂载点，
-/// 视频合成是唯一能在不替换整个播放面的前提下逐帧处理画面的官方路径。
-/// 不用基于素材的合成工厂，是因为 HLS 桥接素材在 `.tracks` 里报 0 条轨道，
-/// 工厂建不出合成；手动建合成 + 自定义合成器不依赖素材轨道。
+/// 逐句移植为 Core Image Metal 内核，逐帧应用到播放画面上。
+///
+/// 显示路线：`AVPlayerItemVideoOutput` 拉帧 + Metal 层显示
+///（`HDRVisionVideoOutputDisplay`）。视频合成路线已死：HLS 桥接素材在
+/// `.tracks` 里报 0 条轨道，合成引擎建不出自定义合成器——旧的
+/// `AVMutableVideoComposition` 和新的 `AVVideoComposition.Configuration`
+/// 都试过，合成器一直“未建”（实测 2026-11-18）。所以不再挂 videoComposition，
+/// 改由引擎复用已有的 videoOutput 拉帧，处理后用 Metal 层盖在播放面上。
+/// 这是 iOS 上与 mpv `glsl-shaders` 对应的做法中唯一能走通的一条。
 ///
 /// 注意（与 PiliPlus 的 GLSL 移植一样）：
 /// - 内核按显示参考值运算，与脚本的纹理值含义一致；SDR 源（BT.709）上效果与脚本一致。
@@ -38,8 +39,8 @@ enum HDRVisionVideoFilter {
     /// Core Image 的 Metal 符号。
     /// 运行时编译（`kernels(withMetalString:)`）在真机上以 CIKernel error 13
     /// 失败且无详细信息，改走构建期编译后，Metal 源码错误会直接出现在构建日志里。
-    /// 不加 private：自定义合成器（HDRVisionVideoCompositor）要读它。
-    /// nonisolated：合成器跑在渲染队列（非主线程）上，内核加载与逐帧应用
+    /// 不加 private：视频输出显示（HDRVisionVideoOutputDisplay）要读它。
+    /// nonisolated：显示的拉帧回调跑在主线程，但内核加载与逐帧应用
     /// 都不碰 @MainActor 的状态（加载失败只写锁保护的 _kernelLoadError，
     /// 日志用的是 nonisolated 的 PlayerMetricsLog.logger）。
     nonisolated static let kernel: CIKernel? = {
@@ -70,46 +71,19 @@ enum HDRVisionVideoFilter {
     private static var _lastApplyStatus = "未调用"
     private static var _framesProcessed = 0
     private static var _framesPassedThrough = 0
-    /// 最近一次建的指令实际要用的轨道 ID（从指令的 requiredSourceTrackIDs 读回）。
-    /// 若这里是空的，说明 Configuration 没把层指令的轨道带进指令，合成器自然收不到帧。
-    /// 注意：iOS 26 上 requiredSourceTrackIDs 是 [NSValue]（不是 [NSNumber]），
-    /// 每个 NSValue 包着一个 CMPersistentTrackID（Int32），用 getValue 取出来。
-    private static var _lastInstructionRequiredTrackIDs: [CMPersistentTrackID] = []
-    /// 合成器是否拿到过渲染上下文（AVFoundation 实例化合成器并调用
-    /// renderContextChanged 后为 true）。若一直 false，说明合成器根本没被建出来。
-    private static var _compositorRenderContextReceived = false
-
-    /// 最近一次建的指令实际要用的轨道 ID。
-    static var lastInstructionRequiredTrackIDs: [CMPersistentTrackID] {
-        statusLock.withLock { _lastInstructionRequiredTrackIDs }
-    }
-
-    /// 合成器是否拿到过渲染上下文。
-    static var compositorRenderContextReceived: Bool {
-        statusLock.withLock { _compositorRenderContextReceived }
-    }
-
-    /// 自定义合成器在 renderContextChanged 里调用：AVFoundation 建出了合成器。
-    /// nonisolated：合成器跑在渲染队列上；只写锁保护的变量。
-    nonisolated static func noteCompositorRenderContextReceived() {
-        statusLock.withLock { _compositorRenderContextReceived = true }
-    }
 
     /// Metal 内核是否加载成功（从 default.metallib）。首次读取会触发加载。
     static var kernelCompiled: Bool { kernel != nil }
 
-    /// 最近一次 apply 的结果：未调用 / 等待就绪… / 已挂载 /
+    /// 最近一次应用的结果：未调用 / 等待就绪… / 显示中（视频输出） /
     /// 开关已关闭 / HDR 源已跳过 / 纯音频已跳过 / 内核未加载：…。
     static var lastApplyStatus: String { statusLock.withLock { _lastApplyStatus } }
 
-    /// 上次创建是否失败或还没挂上（可重试）。开关关闭 / 已挂载不算。
+    /// 上次应用是否失败或还没显示出来（可重试）。开关关闭 / 显示中不算。
     /// 引擎在 item ready 后用它决定是否重试。
     static var lastApplyFailed: Bool {
         statusLock.withLock {
-            _lastApplyStatus.hasPrefix("合成创建失败")
-                || _lastApplyStatus.hasPrefix("内核未加载")
-                || _lastApplyStatus.hasPrefix("无视频轨")
-                || _lastApplyStatus.hasPrefix("加载轨道失败")
+            _lastApplyStatus.hasPrefix("内核未加载")
                 || _lastApplyStatus.hasPrefix("等待就绪")
         }
     }
@@ -131,7 +105,8 @@ enum HDRVisionVideoFilter {
         statusLock.withLock { _framesPassedThrough += 1 }
     }
 
-    private static func setLastApplyStatus(_ status: String) {
+    /// 引擎（视频输出显示的开关逻辑）设置最近一次应用的结果。只写锁保护的变量。
+    static func setLastApplyStatus(_ status: String) {
         statusLock.withLock { _lastApplyStatus = status }
     }
 
@@ -145,113 +120,10 @@ enum HDRVisionVideoFilter {
         statusLock.withLock { _kernelLoadError = message }
     }
 
-    /// 给新装载的视频项应用或清除滤镜。
-    ///
-    /// 只处理 SDR 源：脚本同样跳过 PQ/HLG 的 HDR 源（`source_hdr` 状态）。
-    /// 音频-only 的项没有视频轨，不处理。开关关闭时清除已挂的合成。
-    ///
-    /// 注意：这里不用基于素材的合成工厂（`AVMutableVideoComposition(asset:…)` /
-    /// 异步工厂），因为 HLS 桥接素材在 `.tracks` 里报 0 条轨道——播放列表已解析、
-    /// 时长正常、视频照播，但轨道就是拿不到，工厂每次都返回 nil。改用手动建合成 +
-    /// 自定义合成器（`HDRVisionVideoCompositor`），不依赖素材轨道。
-    /// 手动建合成需要渲染尺寸，只能从已就绪视频项的 `presentationSize` 拿；
-    /// 还没就绪时先记“等待就绪…”，ready 回调会再试一次。
-    static func apply(to item: AVPlayerItem, source: PlayerStreamSource) {
-        let settings = HDRVisionSettingsBox.shared.settings
-        guard settings.enabled else {
-            item.videoComposition = nil
-            setLastApplyStatus("开关已关闭")
-            return
-        }
-        guard !source.dynamicRange.isHDR else {
-            item.videoComposition = nil
-            setLastApplyStatus("HDR 源已跳过")
-            return
-        }
-        guard source.playbackContentMode != .audioOnly else {
-            item.videoComposition = nil
-            setLastApplyStatus("纯音频已跳过")
-            return
-        }
-        guard kernel != nil else {
-            item.videoComposition = nil
-            setLastApplyStatus("内核未加载：\(kernelLoadError ?? "无错误信息")")
-            return
-        }
-        let presentationSize = item.presentationSize
-        guard presentationSize.width > 0, presentationSize.height > 0 else {
-            setLastApplyStatus("等待就绪…")
-            return
-        }
-        let duration = item.duration
-        let timeRange: CMTimeRange
-        if duration.isValid, duration.seconds > 0 {
-            timeRange = CMTimeRange(start: .zero, duration: duration)
-        } else {
-            timeRange = CMTimeRange(start: .zero, duration: CMTime(seconds: 3600, preferredTimescale: 600))
-        }
-        // 轨道 ID：不要猜。合成挂在视频项上，合成引擎按视频项自己的轨道解析，
-        // 而不是按素材的轨道（素材 `.tracks` 是空的）。视频项的轨道在就绪后
-        // 就有了（视频在播，一定有视频轨），从 `item.tracks` 里拿真实的视频轨 ID。
-        // 拿不到时才回退到猜测的 1…8（之前就是这么做的，结果合成器一帧都没收到）。
-        let realVideoTrackIDs = item.tracks
-            .compactMap { $0.assetTrack }
-            .filter { $0.mediaType == .video }
-            .map { $0.trackID }
-        let trackIDs: [CMPersistentTrackID]
-        let trackSource: String
-        if !realVideoTrackIDs.isEmpty {
-            trackIDs = realVideoTrackIDs
-            trackSource = "轨道 \(realVideoTrackIDs.map(String.init).joined(separator: ","))"
-        } else {
-            trackIDs = [1, 2, 3, 4, 5, 6, 7, 8]
-            trackSource = "未找到轨道，猜测 1–8"
-        }
-        // iOS 26 上 AVMutableVideoCompositionInstruction 的 requiredSourceTrackIDs
-        // 是只读的（该类已废弃），不能直接赋值。改用新 Configuration API 建指令：
-        // 每条视频轨一个层指令（层指令配置直接拿轨道 ID，不用素材轨道），
-        // 指令要用的轨道就从层指令里带出来；哪个轨道在播，
-        // 合成器就收到哪个的帧。
-        let layerInstructions = trackIDs.map { id in
-            let layerConfig = AVVideoCompositionLayerInstruction.Configuration(trackID: id)
-            return AVVideoCompositionLayerInstruction(configuration: layerConfig)
-        }
-        var instructionConfig = AVVideoCompositionInstruction.Configuration(timeRange: timeRange)
-        instructionConfig.layerInstructions = layerInstructions
-        let instruction = AVVideoCompositionInstruction(configuration: instructionConfig)
-        // iOS 26 上 AVMutableVideoComposition 已废弃，播放器不再理会它上面挂的
-        // 自定义合成器（合成器一直“未建”）。改用新的 AVVideoComposition.Configuration
-        // 建不可变的 AVVideoComposition，customVideoCompositorClass 放在配置里。
-        // 不用 Configuration(for:) 那个资产初始化器——它要加载素材属性，而素材
-        // 没有轨道，文档也没说这种情况会怎样；长初始化器的参数全有默认值，
-        // 直接按值填，不碰素材。
-        let compositionConfig = AVVideoComposition.Configuration(
-            customVideoCompositorClass: HDRVisionVideoCompositor.self,
-            // 帧间隔给 1/60s（允许到 60fps；源是 30fps 时仍按源帧率出帧）。
-            frameDuration: CMTime(seconds: 1.0 / 60.0, preferredTimescale: 600),
-            instructions: [instruction],
-            renderScale: Float(settings.renderScale),
-            renderSize: presentationSize
-        )
-        let composition = AVVideoComposition(configuration: compositionConfig)
-        item.videoComposition = composition
-        // 把指令实际要用的轨道 ID 读回来记下：若 Configuration 没把层指令的
-        // 轨道带进指令，这里就是空的，合成器收不到帧的原因就找到了。
-        // iOS 26 上 requiredSourceTrackIDs 是 [NSValue]，每个值包着一个
-        // CMPersistentTrackID（Int32），用 getValue 取出来。
-        let requiredTrackIDs = (instruction.requiredSourceTrackIDs ?? []).map { value -> CMPersistentTrackID in
-            var trackID: CMPersistentTrackID = 0
-            value.getValue(&trackID)
-            return trackID
-        }
-        statusLock.withLock { _lastInstructionRequiredTrackIDs = requiredTrackIDs }
-        setLastApplyStatus("已挂载（\(trackSource)）")
-    }
-
     // MARK: - 逐帧应用
 
-    /// 不加 private：自定义合成器（HDRVisionVideoCompositor）逐帧调用它。
-    /// nonisolated：合成器跑在渲染队列上；只做纯计算 + CIKernel.apply。
+    /// 不加 private：视频输出显示（HDRVisionVideoOutputDisplay）逐帧调用它。
+    /// nonisolated：只做纯计算 + CIKernel.apply。
     nonisolated static func applyKernel(
         _ kernel: CIKernel,
         to image: CIImage,

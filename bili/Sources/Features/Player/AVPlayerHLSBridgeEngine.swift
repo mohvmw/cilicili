@@ -48,6 +48,9 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
     private var lastDisplayDynamicRangePolicySummary: String?
     private var playerItem: AVPlayerItem?
     private var videoOutput: AVPlayerItemVideoOutput?
+    /// HDR 视界视频输出显示（替代已死的视频合成路线）：拉帧复用上面已有的
+    /// videoOutput，处理后用 Metal 层盖在播放面上显示。
+    private lazy var hdrDisplay = HDRVisionVideoOutputDisplay(videoOutputProvider: { [weak self] in self?.videoOutput })
     private var hdrVisionSettingsObserver: NSObjectProtocol?
     private var lastVideoFrameImage: UIImage?
     private var recoveryFrameCacheTask: Task<Void, Never>?
@@ -334,12 +337,18 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
             let layer = ensurePlayerLayer(in: surface)
             layer.player = player
             nativeDolbyVideoOverlay.attach(to: surface, gravity: videoGravity)
+            // HDR 显示层：加到播放面，盖住 AVPlayerLayer（子视图最下层）。
+            hdrDisplay.attach(to: surface)
         }
         refreshSurfaceLayout()
+        // 播放面换过：按当前视频项与 HDR 开关重新决定显示是否启动。
+        applyHDRVisionSettingsToCurrentItem()
     }
 
     func detachSurface(_ surface: UIView) {
         guard surfaceView === surface else { return }
+        // HDR 显示：停拉帧并把显示层从播放面移除。
+        hdrDisplay.detach()
         pendingSurfaceDetachTask?.cancel()
         let detachedSurface = surface
         pendingSurfaceDetachTask = Task { @MainActor [weak self, weak detachedSurface] in
@@ -364,6 +373,9 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
             gravity: videoGravity
         )
         nativeDolbyVideoOverlay.refreshLayout(in: surfaceView, gravity: videoGravity)
+        if let surfaceView {
+            hdrDisplay.layout(in: surfaceView)
+        }
     }
 
     func recoverSurface() {
@@ -492,7 +504,7 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         retainedAssets = [asset]
         configureStartupBuffering(for: item, source: source)
         attachVideoOutput(to: item)
-        HDRVisionVideoFilter.apply(to: item, source: source)
+        applyHDRVisionSettingsToCurrentItem()
         player.replaceCurrentItem(with: item)
         oldItem.asset.cancelLoading()
         player.automaticallyWaitsToMinimizeStalling = false
@@ -542,6 +554,7 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         playerViewController?.videoGravity = gravity
         playerLayer?.videoGravity = gravity
         nativeDolbyVideoOverlay.setVideoGravity(gravity, in: surfaceView)
+        hdrDisplay.setVideoGravity(gravity)
     }
 
     func setContentOverlay(_ overlay: AnyView?) {
@@ -558,9 +571,47 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         applyHDRVisionSettingsToCurrentItem()
     }
 
+    /// HDR 视界开关：对当前项立即启动或停止视频输出显示。
+    /// 视频合成路线已死（新旧两种合成 API 都建不出自定义合成器），改走
+    /// AVPlayerItemVideoOutput 拉帧 + Metal 层显示：引擎已有的 videoOutput
+    /// 复用拉帧，处理后的画面盖在 AVPlayerLayer 之上。
+    /// 只处理 SDR 源；开关关 / HDR 源 / 纯音频 / 内核未加载时停显示。
+    /// 还没就绪（presentationSize 为 0）时先记“等待就绪…”，ready 回调会再试。
     private func applyHDRVisionSettingsToCurrentItem() {
-        guard let item = playerItem, let source else { return }
-        HDRVisionVideoFilter.apply(to: item, source: source)
+        guard let item = playerItem, let source else {
+            hdrDisplay.setActive(false)
+            HDRVisionVideoFilter.setLastApplyStatus("未调用")
+            return
+        }
+        let settings = HDRVisionSettingsBox.shared.settings
+        guard settings.enabled else {
+            hdrDisplay.setActive(false)
+            HDRVisionVideoFilter.setLastApplyStatus("开关已关闭")
+            return
+        }
+        guard !source.dynamicRange.isHDR else {
+            hdrDisplay.setActive(false)
+            HDRVisionVideoFilter.setLastApplyStatus("HDR 源已跳过")
+            return
+        }
+        guard source.playbackContentMode != .audioOnly else {
+            hdrDisplay.setActive(false)
+            HDRVisionVideoFilter.setLastApplyStatus("纯音频已跳过")
+            return
+        }
+        guard HDRVisionVideoFilter.kernel != nil else {
+            hdrDisplay.setActive(false)
+            HDRVisionVideoFilter.setLastApplyStatus("内核未加载：\(HDRVisionVideoFilter.kernelLoadError ?? "无错误信息")")
+            return
+        }
+        let presentationSize = item.presentationSize
+        guard presentationSize.width > 0, presentationSize.height > 0 else {
+            hdrDisplay.setActive(false)
+            HDRVisionVideoFilter.setLastApplyStatus("等待就绪…")
+            return
+        }
+        hdrDisplay.setActive(true, videoSize: presentationSize, gravity: videoGravity)
+        HDRVisionVideoFilter.setLastApplyStatus("显示中（视频输出）")
     }
 
     func attachNativePlaybackController(_ controller: AVPlayerViewController) {
@@ -572,6 +623,8 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         configureNativePlaybackController(controller)
         installContentOverlayIfPossible()
         removePlayerLayer()
+        // 画面改由系统播放控制器显示，HDR 显示层（在播放面上）不再对位，先停掉。
+        hdrDisplay.setActive(false)
     }
 
     func setPictureInPictureEnabled(_ isEnabled: Bool) {
@@ -694,7 +747,7 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         let item = prepared.item
         configureStartupBuffering(for: item, source: source)
         attachVideoOutput(to: item)
-        HDRVisionVideoFilter.apply(to: item, source: source)
+        applyHDRVisionSettingsToCurrentItem()
         player.replaceCurrentItem(with: item)
         configureNativeDolbyVideoOverlayIfNeeded(for: source, generation: generation)
         recordPrepareStage(
@@ -1416,6 +1469,8 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         let oldBridge = hlsBridge
         let oldLiveProxy = liveHLSProxy
         silencePlayerImmediately()
+        // HDR 显示：旧项要换掉，先停拉帧、隐藏显示层，免得残留上一条视频的画面。
+        hdrDisplay.setActive(false)
         oldItem?.cancelPendingSeeks()
         oldItem?.asset.cancelLoading()
         if let videoOutput {
@@ -1589,31 +1644,12 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         } else {
             publishPlaybackState(.ready)
         }
-        // HDR 视界：prepare 时素材轨道还没加载，异步创建可能失败；item
-        // ready 后轨道已加载，若上次创建失败且开关还开着，重试一次。
+        // HDR 视界：prepare 时视频项还没就绪（presentationSize 为 0），
+        // 应用会记“等待就绪…”；item ready 后尺寸有了，若上次没显示出来
+        // 且开关还开着，重试一次。
         if HDRVisionSettingsBox.shared.settings.enabled,
            HDRVisionVideoFilter.lastApplyFailed {
             applyHDRVisionSettingsToCurrentItem()
-        } else if HDRVisionSettingsBox.shared.settings.enabled,
-                  HDRVisionVideoFilter.lastApplyStatus == "加载轨道中…" {
-            // 竞态：item 在安装时就已 ready 的话，ready 回调会在轨道加载
-            // 完成前跑到这里，那时还没失败、重试条件不成立；等加载落定
-            // 后失败状态就再也没人重试了（ready 只触发一次）。等它落定
-            // 再看一次，最多等 5 秒，只多试一次。
-            let item = item
-            Task { @MainActor [weak self, weak item] in
-                for _ in 0..<5 {
-                    try? await Task.sleep(nanoseconds: 1_000_000_000)
-                    guard let self, let item else { return }
-                    guard HDRVisionSettingsBox.shared.settings.enabled,
-                          isCurrentPlayerItem(item) else { return }
-                    if HDRVisionVideoFilter.lastApplyFailed {
-                        applyHDRVisionSettingsToCurrentItem()
-                        return
-                    }
-                    guard HDRVisionVideoFilter.lastApplyStatus == "加载轨道中…" else { return }
-                }
-            }
         }
     }
 
