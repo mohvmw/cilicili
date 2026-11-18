@@ -18,6 +18,10 @@ final class HDRVisionDisplayView: UIView {
 
     private var videoSize: CGSize = .zero
     private var videoGravity: AVLayerVideoGravity = .resizeAspect
+    /// 播放层实际的视频矩形（点坐标，相对显示层 bounds），由引擎从
+    /// `AVPlayerLayer.videoRect` 取来。优先用它定位画面（与关 HDR 时
+    /// 播放层显示的位置完全一致）；取不到时才按 videoSize/gravity 自己算。
+    private var videoRect: CGRect = .zero
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -35,10 +39,15 @@ final class HDRVisionDisplayView: UIView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    /// 设置视频尺寸与重力（用于画面适配）。
+    /// 设置视频尺寸与重力（用于画面适配的兜底计算）。
     func configure(videoSize: CGSize, gravity: AVLayerVideoGravity) {
         self.videoSize = videoSize
         self.videoGravity = gravity
+    }
+
+    /// 设置播放层实际的视频矩形（点坐标）。由引擎在布局后从 playerLayer 取来。
+    func setVideoRect(_ rect: CGRect) {
+        videoRect = rect
     }
 
     override func layoutSubviews() {
@@ -71,7 +80,15 @@ final class HDRVisionDisplayView: UIView {
             return false
         }
         let bounds = CGRect(origin: .zero, size: CGSize(width: size.width, height: size.height))
-        let destRect = Self.destinationRect(videoSize: videoSize, in: bounds.size, gravity: videoGravity)
+        // 目标区域：优先用播放层实际的 videoRect（点坐标→像素坐标），
+        // 与关 HDR 时播放层的位置完全一致；取不到时按尺寸/重力自己算。
+        let destRect: CGRect
+        if videoRect.width > 0, videoRect.height > 0, self.bounds.width > 0 {
+            let scale = size.width / self.bounds.width
+            destRect = videoRect.applying(CGAffineTransform(scaleX: scale, y: scale))
+        } else {
+            destRect = Self.destinationRect(videoSize: videoSize, in: bounds.size, gravity: videoGravity)
+        }
         guard let commandBuffer = commandQueue.makeCommandBuffer() else {
             HDRVisionVideoFilter.setDisplayLastError("建命令缓冲失败")
             return false
@@ -159,6 +176,11 @@ final class HDRVisionVideoOutputDisplay {
     /// 按当前布局更新显示层位置（填满播放面）。
     func layout(in surface: UIView) {
         displayView.frame = surface.bounds
+    }
+
+    /// 布局变化时更新显示层的视频矩形（播放层实际位置，点坐标）。
+    func updateVideoRect(_ rect: CGRect) {
+        displayView.setVideoRect(rect)
     }
 
     /// 更新画面重力。

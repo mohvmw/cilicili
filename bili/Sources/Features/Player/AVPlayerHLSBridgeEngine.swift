@@ -375,6 +375,11 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         nativeDolbyVideoOverlay.refreshLayout(in: surfaceView, gravity: videoGravity)
         if let surfaceView {
             hdrDisplay.layout(in: surfaceView)
+            // 布局后把播放层实际的视频矩形同步给显示层，让 HDR 画面与
+            // 关 HDR 时播放层的位置完全一致（不再自己按尺寸/重力估算）。
+            if let videoRect = playerLayer?.videoRect {
+                hdrDisplay.updateVideoRect(videoRect)
+            }
         }
     }
 
@@ -611,6 +616,11 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
             return
         }
         hdrDisplay.setActive(true, videoSize: presentationSize, gravity: videoGravity)
+        // 启动时同步一次播放层实际的视频矩形（布局回调也会同步），
+        // 让 HDR 画面从第一帧就和关 HDR 时的位置一致。
+        if let videoRect = playerLayer?.videoRect {
+            hdrDisplay.updateVideoRect(videoRect)
+        }
         HDRVisionVideoFilter.setLastApplyStatus("显示中（视频输出）")
     }
 
