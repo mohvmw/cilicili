@@ -57,6 +57,11 @@ final class HDRVisionDisplayView: UIView {
         // 超 1.0 的值才能在 XDR 屏上真正亮起来（iOS 按屏幕实际峰值显示）。
         metalLayer.pixelFormat = .rgba16Float
         metalLayer.wantsExtendedDynamicRangeContent = true
+        // 色彩空间必须显式设成扩展 sRGB：计算核输出的是 gamma 编码的
+        // sRGB 值（可超 1.0）。若 colorspace 留空，系统会把纹理值按线性
+        // 理解，中间调全被抬亮，整幅画面泛白。设成扩展 sRGB 后，系统按
+        // sRGB 的 EOTF 解码，超 1.0 的部分才作为 EDR 高光正常显示。
+        metalLayer.colorspace = CGColorSpace(name: CGColorSpace.extendedSRGB)
         metalLayer.contentsScale = UIScreen.main.scale
         isHidden = true
     }
