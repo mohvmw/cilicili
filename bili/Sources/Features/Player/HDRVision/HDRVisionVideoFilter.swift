@@ -7,8 +7,10 @@ import os
 /// HDR 视界视频滤镜。
 ///
 /// 把脚本的 WGSL 管线（去色带 → CAS 锐化 → 曝光 → BT.2446a/幂函数映射 → OKLab 饱和度）
-/// 逐句移植为 Core Image Metal 内核，经手动建的 `AVMutableVideoComposition` +
+/// 逐句移植为 Core Image Metal 内核，经手动建的 `AVVideoComposition`（Configuration API）+
 /// 自定义合成器（`HDRVisionVideoCompositor`）挂到 `AVPlayerItem` 上。
+/// 注意：iOS 26 上 `AVMutableVideoComposition` 已废弃，播放器不再理会它上面挂的
+/// 自定义合成器（实测合成器一直“未建”），所以改用不可变的 `AVVideoComposition`。
 /// 这是 iOS 上与 mpv `glsl-shaders` 对应的做法：AVPlayer 没有 shader 挂载点，
 /// 视频合成是唯一能在不替换整个播放面的前提下逐帧处理画面的官方路径。
 /// 不用基于素材的合成工厂，是因为 HLS 桥接素材在 `.tracks` 里报 0 条轨道，
@@ -181,12 +183,6 @@ enum HDRVisionVideoFilter {
             setLastApplyStatus("等待就绪…")
             return
         }
-        let composition = AVMutableVideoComposition()
-        composition.customVideoCompositorClass = HDRVisionVideoCompositor.self
-        composition.renderSize = presentationSize
-        composition.renderScale = Float(settings.renderScale)
-        // 帧间隔给 1/60s（允许到 60fps；源是 30fps 时仍按源帧率出帧）。
-        composition.frameDuration = CMTime(seconds: 1.0 / 60.0, preferredTimescale: 600)
         let duration = item.duration
         let timeRange: CMTimeRange
         if duration.isValid, duration.seconds > 0 {
@@ -223,7 +219,21 @@ enum HDRVisionVideoFilter {
         var instructionConfig = AVVideoCompositionInstruction.Configuration(timeRange: timeRange)
         instructionConfig.layerInstructions = layerInstructions
         let instruction = AVVideoCompositionInstruction(configuration: instructionConfig)
-        composition.instructions = [instruction]
+        // iOS 26 上 AVMutableVideoComposition 已废弃，播放器不再理会它上面挂的
+        // 自定义合成器（合成器一直“未建”）。改用新的 AVVideoComposition.Configuration
+        // 建不可变的 AVVideoComposition，customVideoCompositorClass 放在配置里。
+        // 不用 Configuration(for:) 那个资产初始化器——它要加载素材属性，而素材
+        // 没有轨道，文档也没说这种情况会怎样；长初始化器的参数全有默认值，
+        // 直接按值填，不碰素材。
+        let compositionConfig = AVVideoComposition.Configuration(
+            customVideoCompositorClass: HDRVisionVideoCompositor.self,
+            // 帧间隔给 1/60s（允许到 60fps；源是 30fps 时仍按源帧率出帧）。
+            frameDuration: CMTime(seconds: 1.0 / 60.0, preferredTimescale: 600),
+            instructions: [instruction],
+            renderScale: Float(settings.renderScale),
+            renderSize: presentationSize
+        )
+        let composition = AVVideoComposition(configuration: compositionConfig)
         item.videoComposition = composition
         // 把指令实际要用的轨道 ID 读回来记下：若 Configuration 没把层指令的
         // 轨道带进指令，这里就是空的，合成器收不到帧的原因就找到了。
