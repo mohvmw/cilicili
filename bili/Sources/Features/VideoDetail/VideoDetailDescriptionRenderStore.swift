@@ -9,6 +9,7 @@ final class VideoDetailDescriptionRenderStore: ObservableObject {
     var titleText: String { snapshot.titleText }
     var owner: VideoOwner? { snapshot.owner }
     var viewCountText: String { snapshot.viewCountText }
+    var danmakuCountText: String { snapshot.danmakuCountText }
     var fanCountText: String { snapshot.fanCountText }
     var publishDateText: String { snapshot.publishDateText }
     var publishDateSubtitleText: String? { snapshot.publishDateSubtitleText }

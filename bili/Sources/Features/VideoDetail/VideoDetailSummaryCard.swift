@@ -33,6 +33,12 @@ struct VideoDetailSummaryCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             if showsVideoInfo {
+                // 对齐原版顺序：UP 行 → 标题 → 数据行 → 操作行。
+                VideoDetailUploaderRow(
+                    store: renderPack.descriptionStore,
+                    onFollow: renderPack.actions.follow
+                )
+
                 VideoDetailInfoBlock(
                     store: renderPack.descriptionStore
                 )

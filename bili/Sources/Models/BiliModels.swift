@@ -293,6 +293,7 @@ nonisolated struct VideoOwner: Decodable, Hashable, Sendable {
 
 nonisolated struct VideoStat: Decodable, Hashable, Sendable {
     let view: Int?
+    let danmaku: Int? = nil
     let reply: Int?
     let like: Int?
     let coin: Int?

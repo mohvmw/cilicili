@@ -5,7 +5,7 @@ struct VideoDetailResolvedInfoContent: View {
     @Binding var isExpanded: Bool
 
     private var presentation: VideoDetailInfoPresentation {
-        VideoDetailInfoPresentation(store: store, isExpanded: isExpanded)
+        VideoDetailInfoPresentation(store: store)
     }
 
     var body: some View {

@@ -4,6 +4,7 @@ struct VideoDetailDescriptionRenderSnapshot: Equatable {
     var titleText = ""
     var owner: VideoOwner?
     var viewCountText = "-"
+    var danmakuCountText = "-"
     var fanCountText = "粉丝 -"
     var publishDateText = "-"
     var publishDateSubtitleText: String?
@@ -25,6 +26,7 @@ struct VideoDetailDescriptionRenderSnapshot: Equatable {
         titleText = detail.title
         owner = detail.owner
         viewCountText = BiliFormatters.compactCount(detail.stat?.view)
+        danmakuCountText = BiliFormatters.compactCount(detail.stat?.danmaku)
         fanCountText = viewModel.uploaderFanCountText
         publishDateText = viewModel.detailDisplayMetrics.publishDateText
         publishDateSubtitleText = viewModel.detailDisplayMetrics.publishDateSubtitleText
