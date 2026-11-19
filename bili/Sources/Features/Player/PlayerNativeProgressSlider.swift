@@ -37,8 +37,13 @@ struct PlayerNativeProgressSlider: View {
                         .allowsHitTesting(false)
                 }
 
+                // 拖动与时长解耦：手势只看播放器能不能 seek（点播/直播），不看时长是否
+                // 已知。无论视频能不能加载、时长是否读到，thumb 都要跟手；松手 seek
+                // 那一下才由 viewModel/引擎决定（时长未知时引擎返回 nil，不会 seek 到 0）。
+                // 之前这里用 effectiveCanSeek（canSeek && duration > 0），时长一丢
+                // 整个进度条就被禁用、拖动中还会被强制取消，看起来像“卡死”。
                 PlayerNativeProgressGestureCaptureLayer(
-                    isEnabled: effectiveCanSeek,
+                    isEnabled: canSeek,
                     onScrubChanged: { progress in
                         updateScrub(at: progress)
                     },
@@ -49,8 +54,11 @@ struct PlayerNativeProgressSlider: View {
             }
             .frame(width: proxy.size.width, height: proxy.size.height)
         }
-        .disabled(!effectiveCanSeek)
-        .onChange(of: effectiveCanSeek) { _, canSeek in
+        // 拖动与时长解耦：只在播放器本身不能 seek 时禁用；时长瞬时丢失不禁用、
+        // 不取消进行中的拖动（之前用 effectiveCanSeek，时长一丢就禁、拖动中翻 false
+        // 还强制取消，进度条看起来像卡死）。
+        .disabled(!canSeek)
+        .onChange(of: canSeek) { _, canSeek in
             if !canSeek {
                 cancelPendingScrubStart()
                 cancelPendingScrubChange()
@@ -157,9 +165,9 @@ struct PlayerNativeProgressSlider: View {
         min(max(scrubbingState.isEditing ? scrubbingState.editingProgress : clock.displayProgress, 0), 1)
     }
 
-    private var effectiveCanSeek: Bool {
-        canSeek && (clock.duration ?? 0) > 0
-    }
+    // 注意：这里故意不用“canSeek && duration > 0”做门禁。拖动只看播放器能不能
+    // seek，时长是否已知不影响 thumb 跟手；松手 seek 时 viewModel/引擎会自己
+    // 处理时长未知的情况（引擎 duration <= 0 时返回 nil，不会 seek 到 0）。
 
     private func updateScrub(at progress: Double) {
         let didBegin = beginScrub(at: progress)
@@ -173,7 +181,7 @@ struct PlayerNativeProgressSlider: View {
         var didBegin = false
         scrubbingState.beginScrub(
             at: progress,
-            canSeek: effectiveCanSeek,
+            canSeek: canSeek,
             onScrubStart: { progress in
                 didBegin = true
                 scheduleScrubStart(at: progress)
@@ -207,7 +215,7 @@ struct PlayerNativeProgressSlider: View {
         hasDeliveredScrubStart = false
         scrubbingState.finishScrub(
             at: progress,
-            canSeek: effectiveCanSeek,
+            canSeek: canSeek,
             onScrubEnded: onScrubEnded
         )
     }
