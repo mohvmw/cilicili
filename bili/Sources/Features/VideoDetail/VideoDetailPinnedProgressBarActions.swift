@@ -56,9 +56,13 @@ struct VideoDetailPinnedProgressBarActions {
             resetScrubState()
             return
         }
+        // 先 seek（写时钟）再清“拖动中”标志：displayedProgress 从 scrubProgress
+        // 切回 playbackProgress（时钟值）时，时钟已经是目标值。之前顺序反了——
+        // isScrubbing 先变 false，显示立刻切回还没更新的时钟（旧播放点），
+        // 进度条先弹回旧位置、再弹回拖动位置。与主进度条 finishScrub 同款问题。
+        seek(to: progress(at: locationX, in: width), beginsInteraction: false)
         isScrubbing = false
         Haptics.light()
-        seek(to: progress(at: locationX, in: width), beginsInteraction: false)
     }
 
     func progress(at locationX: CGFloat, in width: CGFloat) -> Double {

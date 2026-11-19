@@ -294,6 +294,11 @@ final class HDRVisionVideoOutputDisplay {
             displayView.superview?.bringSubviewToFront(displayView)
             lastDisplayedItemTime = nil
             let link = CADisplayLink(target: self, selector: #selector(tickDisplayLink))
+            // 30fps 足够：视频多为 30fps，120Hz 下每帧拉取 + 重计算核（deband 4 尺度 +
+            // CAS + BT.2446a + OKLab，4K 约 300 万像素/帧）很容易让 GPU 饱和，
+            // nextDrawable() 一堵就是几毫秒，主线程上 DisplayLink + 时钟 Timer +
+            // 拖动手势全挤在一起，进度条迟滞、闪烁、卡死。降到 30Hz 负担减到 1/4。
+            link.preferredFramesPerSecond = 30
             link.add(to: .main, forMode: .common)
             displayLink = link
             return true
@@ -317,6 +322,10 @@ final class HDRVisionVideoOutputDisplay {
         guard displayView.window != nil else { return }
         let hostTime = CACurrentMediaTime()
         let itemTime = output.itemTime(forHostTime: hostTime)
+        // 先判有无新帧再取：暂停时无新帧，直接返回，不付 copyPixelBuffer 的代价；
+        // 30fps 视频在高刷下也不用每 tick 都 copy。之前是先 copy 再去重，暂停时
+        // 也在以 120Hz 空转，烧主线程。
+        guard output.hasNewPixelBuffer(forItemTime: itemTime) else { return }
         var displayTime = CMTime.invalid
         guard let pixelBuffer = output.copyPixelBuffer(forItemTime: itemTime, itemTimeForDisplay: &displayTime) else { return }
         // 去重：同一帧在 60Hz 刷新下会取到两次，只画新帧。

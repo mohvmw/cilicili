@@ -365,11 +365,18 @@ final class PlayerPlaybackClock: ObservableObject {
         let durationChanged: Bool
         if let currentDuration = self.duration, let nextDuration {
             durationChanged = abs(currentDuration - nextDuration) >= 0.5
+        } else if nextDuration != nil {
+            // 之前无时长、现在有了 → 更新。
+            durationChanged = true
         } else {
-            durationChanged = self.duration != nil || nextDuration != nil
+            // 传入 nil 表示“不更新时长”，不是“清掉时长”。之前这里会把已有的
+            // 时长写成 nil：一次 displayDuration 为 nil 的刷新就清掉时长，
+            // 进度条被禁用（effectiveCanSeek 翻 false）、总时间变 --:--，
+            // 再由 updateDuration 写回来，来回闪。HDR 的主线程饱和只是把它暴露出来。
+            durationChanged = false
         }
 
-        if force || durationChanged {
+        if let nextDuration, force || durationChanged {
             self.duration = nextDuration
         }
         if force || abs(currentTime - nextTime) >= 0.2 || (currentTime <= 0 && nextTime > 0) {
