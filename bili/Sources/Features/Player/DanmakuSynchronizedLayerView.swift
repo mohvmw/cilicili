@@ -201,6 +201,16 @@ final class DanmakuSynchronizedLayerView: UIView, DanmakuOverlayRendering {
     // MARK: Timeline state
 
     private weak var playbackPlayer: AVPlayer?
+
+    /// 播放器实时倍速：setTemporaryPlaybackRate 在引擎层同步生效，player.rate 在倍速
+    /// 切换的同一刻就是新值，不依赖 SwiftUI apply 的异步更新（长按期间主线程忙，
+    /// apply 可能被推迟到下一个 tick 之后）。暂停时 player.rate 为 0，此时回退
+    /// 到 configuration 的值，避免阈值被压到 1.25 以下。
+    private var livePlaybackRate: Double {
+        let rate = Double(playbackPlayer?.rate ?? 0)
+        if rate > 0.001 { return rate }
+        return configuration?.playbackRate ?? 1.0
+    }
     private var currentItemObservation: NSKeyValueObservation?
     private var timeObserver: Any?
     private var timeJumpObserver: NSObjectProtocol?
@@ -372,15 +382,17 @@ final class DanmakuSynchronizedLayerView: UIView, DanmakuOverlayRendering {
         // 纯倍速变化不是 seek：倍速切换后，时钟（0.05 秒去重订阅）与播放器媒体时间
         // 短暂脱节，差值易超阈值，误触发 resynchronizePresentation → 回收全部在飞
         // 弹幕。AVSynchronizedLayer 的时间基跟随播放器倍速，飞行弹幕会自动加速，
-        // 无需重建。两层保护：① 倍速刚变跳过一次同步；② 阈值按倍速缩放——2x 下
-        // 时钟滞后可达 1.8 秒，固定 1.25 秒太紧（只跳过一次还依赖 apply 与 tick
-        // 的时序）；真正的 seek 通常远大于 2 秒，仍会被捕获。
-        let currentRate = configuration?.playbackRate ?? 1.0
-        let rateChanged = abs(currentRate - lastPlaybackRateForSync) > 0.001
-        lastPlaybackRateForSync = currentRate
+        // 无需重建。用播放器实时倍速（livePlaybackRate），不依赖 apply 异步更新
+        // 的 configuration——长按期间主线程忙，SwiftUI 重渲染可能被推迟到下一个
+        // 时钟 tick 之后，用旧倍速判断会误判。两层保护：① 倍速刚变跳过一次同步；
+        // ② 阈值按倍速缩放（2x 时 2.0 秒；2x 下时钟滞后可达 1.8 秒，固定 1.25 秒
+        // 太紧；真正的 seek 通常远大于 2 秒，仍会被捕获）。
+        let liveRate = livePlaybackRate
+        let rateChanged = abs(liveRate - lastPlaybackRateForSync) > 0.001
+        lastPlaybackRateForSync = liveRate
         if rateChanged && !force { return }
         let mediaTime = resolvedPlaybackTime()
-        let resyncThreshold = max(Self.seekResyncThreshold, 1.0 * currentRate)
+        let resyncThreshold = max(Self.seekResyncThreshold, 1.0 * liveRate)
         guard force || abs(mediaTime - time) > resyncThreshold else { return }
         resynchronizePresentation(at: mediaTime)
     }
@@ -478,6 +490,11 @@ final class DanmakuSynchronizedLayerView: UIView, DanmakuOverlayRendering {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
+                // 诊断：倍速切换是否会触发 AVPlayerItemTimeJumped（静态无法证实）。
+                // 若长按时此日志出现，说明是它在清屏，需在回调里比对时间是否真的跳变。
+                if let self {
+                    PlayerMetricsLog.logger.info("danmakuSync timeJumped rate=\(self.livePlaybackRate) time=\(self.resolvedPlaybackTime())")
+                }
                 self?.resynchronizePresentation()
             }
         }
@@ -507,9 +524,15 @@ final class DanmakuSynchronizedLayerView: UIView, DanmakuOverlayRendering {
 
     private func handleSchedulerTick(at now: Double) {
         guard isRenderingActive, synchronizedLayer != nil else { return }
+        // 阈值按播放器实时倍速缩放：这是播放器自身的周期时间观察器驱动的路，
+        // 与 viewModel 时钟、apply 完全平行，上一轮漏了它。2.0x 下同样的墙钟
+        // 延迟 = 2 倍媒体时间，固定 1.25 秒阈值下只要 0.625 秒墙钟延迟就误判
+        // 成 seek → 全量回收清屏。用 livePlaybackRate（播放器实时倍速），
+        // 不依赖 apply 异步更新的 configuration。
+        let threshold = max(Self.seekResyncThreshold, 1.0 * livePlaybackRate)
         if let lastObservedPlaybackTime,
            now + 0.05 < lastObservedPlaybackTime
-                || now - lastObservedPlaybackTime > Self.seekResyncThreshold {
+                || now - lastObservedPlaybackTime > threshold {
             resynchronizePresentation(at: now)
             return
         }
@@ -1013,7 +1036,8 @@ final class DanmakuSynchronizedLayerView: UIView, DanmakuOverlayRendering {
         format.scale = window?.windowScene?.screen.scale ?? UIScreen.main.scale
         let renderer = UIGraphicsImageRenderer(size: clampedSize, format: format)
         let image = renderer.image { _ in
-            rendered.attributedText.draw(
+            DanmakuKitTextCellModel.drawWithGlyphOutline(
+                rendered.attributedText,
                 in: CGRect(origin: .zero, size: clampedSize)
             )
         }

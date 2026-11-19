@@ -75,15 +75,14 @@ final class DanmakuKitTextCellModel: DanmakuCellModel {
         font: UIFont,
         color: UIColor
     ) -> (attributedText: NSAttributedString, missingImageURLs: [URL]) {
-        // 弹幕字体改黑边框（描边）代替阴影：strokeWidth 为负表示“描边 + 填充”，
-        // 正值会只剩空心描边。描边要细（1pt 起，按字号略增），与 Metal 后端的
-        // 1 像素描边观感一致；描边太粗（2pt）会让字体看起来变粗、发胖。
-        let strokeWidth = -max(1.0, font.pointSize * 0.05)
+        // 弹幕字体改黑边框（描边）代替阴影：描边按整个字形画，不用
+        // NSAttributedString 的 .strokeWidth——它是按字形路径的每个子路径描边，
+        // 中文字笔画靠得近，一个笔画的描边会进到另一个笔画里，字看起来发胖、
+        // 发空。改在绘制时做 8 向偏移（见 drawWithGlyphOutline）：黑色版向 8 个
+        // 方向各偏移 1 像素画一遍，再画彩色正文，描边只出现在字形外轮廓。
         let baseAttributes: [NSAttributedString.Key: Any] = [
             .font: font,
-            .foregroundColor: color,
-            .strokeColor: UIColor.black,
-            .strokeWidth: strokeWidth
+            .foregroundColor: color
         ]
         guard !text.isEmpty, !emotes.isEmpty else {
             return (NSAttributedString(string: text, attributes: baseAttributes), [])
@@ -117,6 +116,58 @@ final class DanmakuKitTextCellModel: DanmakuCellModel {
             result.append(NSAttributedString(string: text, attributes: baseAttributes))
         }
         return (result, Array(Set(missingImageURLs)))
+    }
+
+    /// 生成用于描边的黑色版富文本：文字变黑；表情附件去图只占位（同 bounds、无图），
+    /// 避免描边时表情图片重影 8 次。占位附件仍按 bounds 占宽，版式与正文一致。
+    private static func outlineCopy(of attributedText: NSAttributedString) -> NSAttributedString {
+        let copy = NSMutableAttributedString(attributedString: attributedText)
+        let fullRange = NSRange(location: 0, length: copy.length)
+        copy.addAttribute(.foregroundColor, value: UIColor.black, range: fullRange)
+        var attachmentRanges: [(range: NSRange, bounds: CGRect)] = []
+        copy.enumerateAttribute(.attachment, in: fullRange, options: []) { value, range, _ in
+            if let attachment = value as? NSTextAttachment {
+                attachmentRanges.append((range, attachment.bounds))
+            }
+        }
+        for (range, bounds) in attachmentRanges {
+            let placeholder = NSTextAttachment()
+            placeholder.bounds = bounds
+            copy.addAttribute(.attachment, value: placeholder, range: range)
+        }
+        return copy
+    }
+
+    /// 按整个字形描边（非按笔画）：黑色版向 8 个方向各偏移 1 像素画一遍，再画彩色正文。
+    /// 8 向偏移是把整个字形向外扩 1 像素，描边只出现在字形外轮廓，不会吃进笔画间隙，
+    /// 与 Metal 后端的 1 像素黑边观感一致。
+    static func drawWithGlyphOutline(_ attributedText: NSAttributedString, at origin: CGPoint) {
+        let d = 1.0 / UIScreen.main.scale
+        let outline = outlineCopy(of: attributedText)
+        let offsets: [CGPoint] = [
+            CGPoint(x: -d, y: -d), CGPoint(x: 0, y: -d), CGPoint(x: d, y: -d),
+            CGPoint(x: -d, y: 0),                          CGPoint(x: d, y: 0),
+            CGPoint(x: -d, y: d),  CGPoint(x: 0, y: d),  CGPoint(x: d, y: d),
+        ]
+        for offset in offsets {
+            outline.draw(at: CGPoint(x: origin.x + offset.x, y: origin.y + offset.y))
+        }
+        attributedText.draw(at: origin)
+    }
+
+    /// 同上，绘制到指定矩形内（同步层渲染到位图时用）。
+    static func drawWithGlyphOutline(_ attributedText: NSAttributedString, in rect: CGRect) {
+        let d = 1.0 / UIScreen.main.scale
+        let outline = outlineCopy(of: attributedText)
+        let offsets: [CGPoint] = [
+            CGPoint(x: -d, y: -d), CGPoint(x: 0, y: -d), CGPoint(x: d, y: -d),
+            CGPoint(x: -d, y: 0),                          CGPoint(x: d, y: 0),
+            CGPoint(x: -d, y: d),  CGPoint(x: 0, y: d),  CGPoint(x: d, y: d),
+        ]
+        for offset in offsets {
+            outline.draw(in: rect.offsetBy(dx: offset.x, dy: offset.y))
+        }
+        attributedText.draw(in: rect)
     }
 
     private static func nextEmote(
@@ -172,13 +223,10 @@ final class DanmakuKitTextCellModel: DanmakuCellModel {
         color: UIColor,
         missingImageURLs: inout [URL]
     ) -> NSAttributedString {
-        // 表情 token 与附件统一用黑描边（与正文一致），不再用阴影。
-        let strokeWidth = -max(1.0, font.pointSize * 0.05)
+        // 表情 token 与附件统一用黑边框（与正文一致，绘制时 8 向偏移），不再用阴影。
         let strokeAttributes: [NSAttributedString.Key: Any] = [
             .font: font,
-            .foregroundColor: color,
-            .strokeColor: UIColor.black,
-            .strokeWidth: strokeWidth
+            .foregroundColor: color
         ]
         guard let urlString = emote.displayURL,
               let url = URL(string: urlString)
@@ -250,7 +298,7 @@ final class DanmakuKitTextCell: DanmakuCell {
             context: nil
         )
         let origin = CGPoint(x: 6, y: max(0, (size.height - textBounds.height) * 0.5))
-        model.attributedText.draw(at: origin)
+        DanmakuKitTextCellModel.drawWithGlyphOutline(model.attributedText, at: origin)
     }
 
     override func willDisplay() {

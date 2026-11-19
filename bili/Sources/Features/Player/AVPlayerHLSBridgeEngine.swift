@@ -253,19 +253,6 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         hlsBridge?.requestCountSnapshot()
     }
 
-    /// 左上角实时网速：转发到当前 HLS 桥的已服务字节数（缓存命中 + 远端拉取）。
-    /// 注意 servedBytesSnapshot / remoteDownloadSnapshot 只定义在 LocalHLSBridge
-    /// 上，引擎必须自己转发——否则 viewModel 调 engine.servedBytesSnapshot()
-    /// 会落到协议默认实现，恒返回 0（前两轮网速恒为 0 的根因）。
-    /// 不加 nonisolated：引擎是 @MainActor，hlsBridge 是 MainActor 隔离属性。
-    func servedBytesSnapshot() -> Int {
-        hlsBridge?.servedBytesSnapshot() ?? 0
-    }
-
-    func remoteDownloadSnapshot() -> (bytes: Int, active: Int, peak: Int) {
-        hlsBridge?.remoteDownloadSnapshot() ?? (0, 0, 0)
-    }
-
     var debugPlaybackRate: Float {
         currentRate
     }
@@ -274,6 +261,21 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         player.rate
     }
 #endif
+
+    /// 左上角实时网速：转发到当前 HLS 桥的已服务字节数（缓存命中 + 远端拉取）。
+    /// 注意 servedBytesSnapshot / remoteDownloadSnapshot 只定义在 LocalHLSBridge
+    /// 上，引擎必须自己转发——否则 viewModel 调 engine.servedBytesSnapshot()
+    /// 会落到协议默认实现，恒返回 0（前两轮网速恒为 0 的根因）。
+    /// 必须放在 #if DEBUG 块之外：上一轮把它写进了 DEBUG 块里，Release 包
+    /// （workflow 打的包）会把整个块裁掉，转发方法在 Release 下根本不存在。
+    /// 不加 nonisolated：引擎是 @MainActor，hlsBridge 是 MainActor 隔离属性。
+    func servedBytesSnapshot() -> Int {
+        hlsBridge?.servedBytesSnapshot() ?? 0
+    }
+
+    func remoteDownloadSnapshot() -> (bytes: Int, active: Int, peak: Int) {
+        hlsBridge?.remoteDownloadSnapshot() ?? (0, 0, 0)
+    }
 
     init(audioSession: PlaybackAudioSession = .shared) {
         self.audioSession = audioSession

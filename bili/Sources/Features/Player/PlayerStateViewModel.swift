@@ -633,7 +633,11 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
     private var playbackStateRefreshInterval: TimeInterval = 1.0
     private let sponsorBlockPrerollTolerance: TimeInterval = 0.35
     private let sponsorBlockTailTolerance: TimeInterval = 0.12
-    private let forcedPlaybackTimeGuardDuration: TimeInterval = 3.5
+    // 强制时间守卫：seek 后多长时间内忽略播放器旧时间、保留 optimistic 目标。
+    // 拖到未缓存区松手后，播放器要经本地代理拉目标分段 + 补前向缓冲（WiFi 11.5s），
+    // 慢于 3.5s 很常见；守卫一过期，时钟就弹回旧位置（缓存末端附近），看起来像
+    // “拖不过缓存进度”。放宽到 8s，给慢速未缓存 seek 足够时间完成。
+    private let forcedPlaybackTimeGuardDuration: TimeInterval = 8.0
     private let forcedPlaybackTimeGuardTolerance: TimeInterval = 2.0
     private let forcedPlaybackTimeRollbackTolerance: TimeInterval = 0.08
     private let forcedPlaybackTimeSettleAdvance: TimeInterval = 0.16
@@ -3598,12 +3602,28 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
             }
             guard let appliedTime else {
                 signpostMessage = "mode=slider target=\(String(format: "%.3f", targetProgress)) skipped"
-                self.isUserSeeking = false
-                self.isBuffering = false
-                self.shouldResumePlaybackAfterUserScrub = false
-                self.clearPendingUserSeekRevealTarget()
-                self.refreshPlaybackState()
-                self.engine.setTemporaryAudioSuppressed(false)
+                // 引擎返回 nil 不代表 seek 一定失败（可能是 seek 被取消或 generation
+                // 变化），也不要立刻弹回旧位置：立刻 refreshPlaybackState() 会把进度
+                // 条弹回缓存末端，看起来像“拖不过缓存进度”。保留 optimistic 目标并
+                // 启动看门狗重试一次（2.8s 后重 seek 原始目标），由看门狗定夺。
+                if let optimisticTargetTime {
+                    setPendingUserSeekRevealTarget(optimisticTargetTime)
+                    beginSeekRecoveryTracking(
+                        reason: "slider-engine-nil",
+                        targetTime: optimisticTargetTime,
+                        targetProgress: targetProgress,
+                        startedAt: userSeekStart,
+                        engineElapsedMilliseconds: engineElapsed,
+                        baselineContext: recoveryBaselineContext
+                    )
+                } else {
+                    self.isUserSeeking = false
+                    self.isBuffering = false
+                    self.shouldResumePlaybackAfterUserScrub = false
+                    self.clearPendingUserSeekRevealTarget()
+                    self.refreshPlaybackState()
+                    self.engine.setTemporaryAudioSuppressed(false)
+                }
                 return
             }
             self.setPendingUserSeekRevealTarget(appliedTime)
