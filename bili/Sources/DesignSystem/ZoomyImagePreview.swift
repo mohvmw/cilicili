@@ -220,6 +220,12 @@ struct ZoomyRemoteImage<Placeholder: View>: View {
     @StateObject private var loader = CachedRemoteImageLoader()
     @StateObject private var sourceAnchor = ZoomySourceAnchor()
     @State private var isViewerPresented = false
+    /// 第 18 轮：拖动期间禁止点按的共享状态（详情页透传，其他地方为 nil = 不抑制）。
+    /// 评论图片在 UITableView cell 的 UIHostingController 里，第 17 轮已在
+    /// injectedCellEnvironment 显式注入，CommentRow → CommentImageButton →
+    /// MosaicGrid/Content/Tile/Thumbnail 都是同一 hosting 层级的纯 SwiftUI 视图，
+    /// 环境能流到这里。录屏里滑动起手落在评论图片上、查看器反复打开，就是它。
+    @Environment(\.videoDetailTapSuppression) private var tapSuppression
     @State private var isSourceContentHidden = false
     @State private var reportedImageIdentifier: ObjectIdentifier?
     @State private var viewerLoadTask: Task<Void, Never>?
@@ -415,6 +421,12 @@ struct ZoomyRemoteImage<Placeholder: View>: View {
     }
 
     private func presentViewer() {
+        // 第 18 轮：拖动刚结束时松手触发的点按直接跳过（页面还在落位动画里）。
+        // Button 在松手、手指仍在其 bounds 内时触发；跟手滑动时图片跟着手指走，
+        // 松手时仍在 Button 内，第 15 轮的 allowsHitTesting 拦不住 in-flight 按压。
+        // ZoomyImagePreview 是 DesignSystem 共享组件（动态、消息里也在用），
+        // 环境默认 nil = 不抑制，其他地方行为不变。
+        guard tapSuppression?.isSuppressed != true else { return }
         guard canPresentViewer else { return }
         startViewerImageLoad()
         onViewerPresentationChange?(true)

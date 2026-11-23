@@ -71,7 +71,7 @@ struct CommentRow: View, Equatable {
             CommentRowReplyPreviewSection(
                 display: display,
                 isEnabled: style.showsReplyPreviewContainer,
-                showReplies: showReplies,
+                showReplies: guardedShowReplies,
                 replyToComment: replyToComment
             )
         }
@@ -93,6 +93,20 @@ struct CommentRow: View, Equatable {
         return {
             guard tapSuppression?.isSuppressed != true else { return }
             replyAction()
+        }
+    }
+
+    /// 第 18 轮：回复预览的 showReplies 也要在触发时拦。CommentRow 把 showReplies
+    /// 传给 CommentRowReplyPreviewSection，它再传给两处触发点：回复数 Button
+    /// （CommentReplyPreviewContainer.replyCountAction 的“ N 条回复”）与预览行
+    /// 点按（ReplyPreviewRow.commentTapAction = showReplies，经 onNonLinkTap）。
+    /// 在这里包一层 guard，两处触发都拦住；showReplies 只在这里用，别处没有。
+    /// 闭包捕获共享对象引用，触发时读到的 isSuppressed 永远是最新值。
+    private var guardedShowReplies: () -> Void {
+        let tapSuppression = tapSuppression
+        return {
+            guard tapSuppression?.isSuppressed != true else { return }
+            showReplies()
         }
     }
 

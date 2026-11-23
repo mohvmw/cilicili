@@ -8,6 +8,10 @@ import SwiftUI
 /// retained 显示缓存、animatesAppearance = false，只要行 identity 稳定就不会重载占位图。
 struct VideoDetailUploaderRow: View {
     @Environment(\.appThemeTintColor) private var appTintColor
+    /// 第 18 轮：拖动期间禁止点按的共享状态（简介页内容在 UIHostingController 里，
+    /// 第 17 轮已在 scrollContent 显式注入环境，UP 行在 summary 卡片里、能读到；
+    /// 其他地方为 nil = 不抑制）。
+    @Environment(\.videoDetailTapSuppression) private var tapSuppression
 
     @ObservedObject var store: VideoDetailDescriptionRenderStore
     let onFollow: () -> Void
@@ -49,7 +53,7 @@ struct VideoDetailUploaderRow: View {
 
                 Spacer()
 
-                Button(action: onFollow) {
+                Button(action: guardedFollow) {
                     Label(
                         store.isFollowing ? "已关注" : "关注",
                         systemImage: store.isFollowing ? "checkmark" : "plus"
@@ -72,5 +76,13 @@ struct VideoDetailUploaderRow: View {
                 .accessibilityIdentifier("video.detail.uploaderRow.follow")
             }
         }
+    }
+
+    /// 第 18 轮：拖动期间禁止点按。Button 在松手、手指仍在其 bounds 内时触发；
+    /// 跟手滑动时 UP 行跟着手指走，松手时仍在 Button 内，allowsHitTesting
+    /// 拦不住 in-flight 按压，所以在触发时拦。环境默认 nil = 不抑制。
+    private func guardedFollow() {
+        guard tapSuppression?.isSuppressed != true else { return }
+        onFollow()
     }
 }
