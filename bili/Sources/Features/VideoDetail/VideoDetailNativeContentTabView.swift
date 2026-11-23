@@ -92,9 +92,13 @@ struct VideoDetailNativeContentTabView<Content: View>: View {
     /// 经 toolbarSelection 切换，onSelectionWillChange 照常触发。
     /// 注意：手势挂在 tabContent 外层，各页内部的竖向滚动（简介 UIScrollView、
     /// 评论 UITableView）与横滑手势同时识别，竖滑由位移判断过滤掉，不会误切。
+    /// 第 13 轮：边缘开始的滑动不切 tab——从屏幕左边缘开始的右滑留给系统返回
+    /// （桥接层已把内容 pop 手势限定为边缘开始），否则边缘右滑会一边返回一边
+    /// 切 tab。tabContent 占满宽度，startLocation.x 就是离左边缘的距离。
     private var tabSwipeGesture: some Gesture {
         DragGesture()
             .onEnded { value in
+                guard value.startLocation.x > 30 else { return }
                 let translation = value.translation
                 guard abs(translation.width) > 60,
                       abs(translation.width) > abs(translation.height)

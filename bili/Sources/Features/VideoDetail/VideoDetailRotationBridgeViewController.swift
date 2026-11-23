@@ -617,6 +617,18 @@ extension VideoDetailRotationBridgeViewController: UIGestureRecognizerDelegate {
         guard let navigationController,
               navigationController.viewControllers.count > 1
         else { return false }
+        // 第 13 轮：内容 pop 手势（iOS 26 全屏 pop，可从页面任意位置开始）只放行
+        // 从左边缘开始的右滑（起始点 x ≤ 30pt）。页面内右滑留给简介/评论切换，
+        // 只有从屏幕左边缘开始的右滑才返回。边缘 pop 手势自身只在边缘开始，
+        // 不用另加限制。起始点用“当前位置 − 累计位移”还原：shouldBegin 调用时
+        // 手指已经移动过，直接用当前位置会误拒快速的边缘滑动。shouldReceive
+        // 里还有一道同样的边缘要求（用触点落点），两处互相兜底。
+        if gestureRecognizer === navigationController.interactiveContentPopGestureRecognizer,
+           let panGesture = gestureRecognizer as? UIPanGestureRecognizer {
+            let location = panGesture.location(in: navigationController.view)
+            let translation = panGesture.translation(in: navigationController.view)
+            guard location.x - translation.x <= 30 else { return false }
+        }
         // 触点落在播放面内时，只放行向右且横向占优的滑动：竖屏画面横滑调进度已禁用，
         // 这种右滑就是系统返回；竖滑（亮度/音量）、左滑、长按 2x 仍被挡在返回手势之外。
         // 播放面外的触点沿用老行为（不做方向判断）。
@@ -638,6 +650,16 @@ extension VideoDetailRotationBridgeViewController: UIGestureRecognizerDelegate {
     ) -> Bool {
         guard isSystemBackGesture(gestureRecognizer) else { return true }
         guard !rotationCoordinator.isLandscape else { return false }
+        // 第 13 轮：内容 pop 手势（iOS 26 全屏 pop，可从页面任意位置开始）只接
+        // 左边缘开始的触点（落点 x ≤ 30pt）。页面内右滑要留给简介/评论切换
+        // （内容区与播放器画面都有切 tab 手势），只有从屏幕左边缘开始的右滑才
+        // 返回。边缘 pop 手势自身只在边缘开始，不用另加限制。shouldBegin 里
+        // 还有一道同样的边缘要求（用起始点还原），两处互相兜底。
+        if let navigationController,
+           gestureRecognizer === navigationController.interactiveContentPopGestureRecognizer,
+           touch.location(in: navigationController.view).x > 30 {
+            return false
+        }
         // 第 9 轮：只针对竖视频（宽高比 < 0.9）。横屏视频竖屏内嵌时，播放面上的触点
         // 不交给系统返回手势，恢复 round-8 之前的行为（画面右滑不返回）；只有竖视频
         // 才放行播放面触点。播放面外的触点沿用老行为。

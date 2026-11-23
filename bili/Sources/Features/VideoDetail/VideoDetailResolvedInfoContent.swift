@@ -11,7 +11,14 @@ struct VideoDetailResolvedInfoContent: View {
     var body: some View {
         // 第 9 轮简介页紧凑化：标题 / 数据行 / 展开简介之间的间距 6→4。
         VStack(alignment: .leading, spacing: 4) {
+            // 第 13 轮：标题行数变化脱离动画事务。收起时标题 lineLimit 由 nil→1，
+            // 文字立即截断，但 VStack 的 .snappy 会让标题 frame 再动画收，文字与
+            // frame 不同步、视觉上就是标题闪一下。这里让标题行的行数与 frame 都
+            // 立即落到最终值（不参与 .snappy 插值）；展开简介的显隐与下方内容的
+            // 跟随滑动仍走 VStack 的动画。没简介内容时走 ViewThatFits 首选
+            // （固定 isExpanded: false，行数不变），本来就不闪，不受影响。
             titleRow
+                .transaction { $0.animation = nil }
                 .commentCopyContextMenu(text: store.titleText, title: "复制标题")
 
             VideoDetailInfoMetadataRow(

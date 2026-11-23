@@ -645,6 +645,10 @@ private struct VideoDetailInteractivePlayerLayer: View {
     let onToggleDanmaku: () -> Void
     let onShowDanmakuSettings: () -> Void
     let onNavigateBack: () -> Void
+    /// 播放器画面上左右滑动切 tab 的回调（第 13 轮）：播放器面内识别到横向占优
+    /// 的滑动后，把目标 tab 交给外层容器切换（与内容区 tabSwipeGesture 同方向、
+    /// 同阈值，走同一个 selectedContentTab 绑定，交叉淡入动画照常播放）。
+    let onSurfaceTabSwipe: (VideoDetailContentTab) -> Void
 
     var body: some View {
         let layout = model.layout(
@@ -696,6 +700,7 @@ private struct VideoDetailInteractivePlayerLayer: View {
                 .frame(width: layout.playerFrame.width, height: layout.playerFrame.height)
                 .position(x: layout.playerFrame.midX, y: layout.playerFrame.midY)
                 .disablingRotationTransaction(suppressesRotationAnimation)
+                .simultaneousGesture(surfaceTabSwipeGesture(isFullscreenLayout: layout.usesFullscreenLayout))
                 .zIndex(2)
 
                 if showsCollapsedChrome && !layout.usesFullscreenLayout {
@@ -739,6 +744,31 @@ private struct VideoDetailInteractivePlayerLayer: View {
             guard newLayout.playerFrame != model.playerFrame else { return }
             model.scheduleLayoutSynchronization(newLayout)
         }
+    }
+
+    /// 播放器画面上的左右滑动切 tab（第 13 轮，竖视频竖屏内嵌时）：与内容区
+    /// tabSwipeGesture 同阈值（|dx|>60 且横向占优）、同方向（左滑进评论、右滑
+    /// 回简介），目标 tab 交给 onSurfaceTabSwipe，经同一个 selectedContentTab
+    /// 绑定切换，交叉淡入动画照常播放。横屏视频与全屏时不触发（画面横滑仍调
+    /// 进度）；边缘开始的右滑留给系统返回，不切 tab。
+    /// 注意：手势挂在播放器面（UIViewRepresentable）外层，用 simultaneous，
+    /// 不抢竖向亮度/音量、长按 2x 与点击；横向占优的判断在 onEnded 里做，
+    /// 竖滑/斜滑不会误切。
+    private func surfaceTabSwipeGesture(isFullscreenLayout: Bool) -> some Gesture {
+        DragGesture()
+            .onEnded { value in
+                guard model.videoAspectRatio < 0.9, !isFullscreenLayout else { return }
+                guard value.startLocation.x > 30 else { return }
+                let translation = value.translation
+                guard abs(translation.width) > 60,
+                      abs(translation.width) > abs(translation.height)
+                else { return }
+                let tabs = VideoDetailContentTab.allCases
+                guard let index = tabs.firstIndex(of: selectedContentTab) else { return }
+                let targetIndex = translation.width < 0 ? index + 1 : index - 1
+                guard tabs.indices.contains(targetIndex) else { return }
+                onSurfaceTabSwipe(tabs[targetIndex])
+            }
     }
 }
 
@@ -866,7 +896,17 @@ struct VideoDetailSwiftUIContainer: View {
                     onExitFullscreen: onExitFullscreen,
                     onToggleDanmaku: onToggleDanmaku,
                     onShowDanmakuSettings: onShowDanmakuSettings,
-                    onNavigateBack: onNavigateBack
+                    onNavigateBack: onNavigateBack,
+                    // 第 13 轮：播放器画面滑动切 tab。与 tab view 的 toolbarSelection
+                    // 同路径——切换前先准备 interactive 收起，再改 binding；
+                    // ShellContentView 的 .onChange 随后触发 onSelectedTabChange
+                    //（prepare + handle），交叉淡入动画照常播放。
+                    onSurfaceTabSwipe: { target in
+                        if isInteractiveScrollCollapseEnabled {
+                            model.prepareInteractiveTabChange(to: target, bounds: proxy.size)
+                        }
+                        selectedContentTab = target
+                    }
                 )
             }
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
