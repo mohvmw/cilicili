@@ -808,6 +808,24 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
                 renderState: renderState,
                 contentInsets: videoInsets
             )
+            // 手势层单独提成一个 let 再放进 ZStack：body 整个表达式太大，
+            // 把这个带 12 个参数的构造内联在里面会让编译器类型检查超时。
+            // 只构造不挂载没有副作用，是否显示仍由下面的 shouldKeepChromeMounted 决定。
+            let gestureLayer = BiliPlayerSurfaceGestureLayerHost(
+                content: Color.clear
+                    .frame(maxWidth: .infinity, maxHeight: .infinity),
+                visibilityActions: visibilityActions,
+                speedBoostActions: speedActions,
+                viewModel: viewModel,
+                allowsDoubleTapPlaybackToggle: true,
+                allowsHorizontalSurfaceSeek: renderContext.configuration.isFullscreenActive,
+                seekPreviewModel: renderContext.seekPreviewModel,
+                seekPreviewAPI: renderContext.seekPreviewAPI,
+                seekPreviewContext: renderContext.seekPreviewContext,
+                holdCurrentFrameForSeek: holdCurrentFrameForSeek,
+                prepareUserSeekWarmup: prepareUserSeekWarmupIfNeeded,
+                resetPreparedScrubProgress: { lastPreparedScrubProgress = -1 }
+            )
             ZStack {
                 if isAudioOnlyPlayback {
                     VideoListenArtworkLayer(
@@ -820,21 +838,7 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
 
                 if shouldKeepChromeMounted {
                     Group {
-                        BiliPlayerSurfaceGestureLayerHost(
-                            content: Color.clear
-                                .frame(maxWidth: .infinity, maxHeight: .infinity),
-                            visibilityActions: visibilityActions,
-                            speedBoostActions: speedActions,
-                            viewModel: viewModel,
-                            allowsDoubleTapPlaybackToggle: true,
-                            allowsHorizontalSurfaceSeek: renderContext.configuration.isFullscreenActive,
-                            seekPreviewModel: renderContext.seekPreviewModel,
-                            seekPreviewAPI: renderContext.seekPreviewAPI,
-                            seekPreviewContext: renderContext.seekPreviewContext,
-                            holdCurrentFrameForSeek: holdCurrentFrameForSeek,
-                            prepareUserSeekWarmup: prepareUserSeekWarmupIfNeeded,
-                            resetPreparedScrubProgress: { lastPreparedScrubProgress = -1 }
-                        )
+                        gestureLayer
                         .zIndex(1)
 
                         BiliPlayerSurfaceOverlayLayer(
