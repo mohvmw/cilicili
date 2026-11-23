@@ -25,6 +25,21 @@ struct VideoDetailNativeContentTabView<Content: View>: View {
     /// 此时回退到 topInset（展开高度）。必须是 var：合成 memberwise init
     /// 会排除带默认值的 let，写 let 会导致调用方编译不过。
     var currentPlayerHeight: CGFloat = 0
+    /// 跟手滑动的横向偏移（第 14 轮卡片滑动）：内容区手势 onChanged 里实时更新，
+    /// 两页的 offset 都加上它，手指一动页面就跟着动。松手后归位/切换时再动画回 0。
+    /// 注意：它不是动画值——onChanged 里直接赋值（无动画），只有松手归位/切换
+    /// 时才包在 withAnimation 里；否则跟手会滞后。
+    @State private var dragOffset: CGFloat = 0
+    /// 跟手滑动的目标页（第 14 轮）：横滑方向上有相邻页时才有值。incoming 页
+    /// 靠它提前挂载/显示（isPageVisible），否则滑动时滑入的是空白卡片。
+    /// 切换成功时随 selection 一起清掉；弹回时动画结束后再清（见 snapDragBack）。
+    @State private var dragTarget: VideoDetailContentTab? = nil
+    /// 横滑方向是否已锁定（第 14 轮）：nil=未判定，true=横滑，false=竖滑。
+    /// 一旦判定为竖滑，本次手势不再跟手，避免竖向滚动时页面横向抖动。
+    @State private var isHorizontalDrag: Bool? = nil
+    /// 跟手会话编号（第 14 轮）：每次横滑判定开始时 +1。弹回的延迟清理用它
+    /// 校验，避免旧的延迟清理误删新一次滑动的目标页。
+    @State private var dragSession = 0
     var contentRevision: Int = 0
     var onOpenCommentComposer: (() -> Void)?
     var onSelectionWillChange: ((VideoDetailContentTab) -> Void)? = nil
@@ -73,7 +88,7 @@ struct VideoDetailNativeContentTabView<Content: View>: View {
         ZStack {
             ForEach(VideoDetailContentTab.allCases) { tab in
                 page(for: tab)
-                    .opacity(selection == tab ? 1 : 0)
+                    .offset(x: pageOffset(for: tab))
                     .allowsHitTesting(selection == tab)
                     .accessibilityHidden(selection != tab)
             }
@@ -81,34 +96,129 @@ struct VideoDetailNativeContentTabView<Content: View>: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
         .animation(.smooth(duration: 0.28), value: selection)
-        // 左右滑动切换 tab（原版行为）：横向占优的 DragGesture，用 simultaneous
-        // 挂在内容区外层，不抢竖向滚动——竖滑仍由各页自己的滚动视图接管。
-        // 只有横向位移足够大且横向占优时才切 tab；竖向/斜向拖动一律放行。
+        // 左右滑动切换 tab（原版卡片效果，第 14 轮）：横向占优的 DragGesture，
+        // 用 simultaneous 挂在内容区外层，不抢竖向滚动——竖滑仍由各页自己的
+        // 滚动视图接管。跟手时两页实时跟随手指；松手超过阈值完成切换、不足弹回。
         .simultaneousGesture(tabSwipeGesture)
         .background(VideoDetailTheme.background)
     }
 
-    /// 左右滑动切 tab：左滑进下一页（简介→评论），右滑回上一页（评论→简介）。
-    /// 经 toolbarSelection 切换，onSelectionWillChange 照常触发。
-    /// 注意：手势挂在 tabContent 外层，各页内部的竖向滚动（简介 UIScrollView、
-    /// 评论 UITableView）与横滑手势同时识别，竖滑由位移判断过滤掉，不会误切。
-    /// 第 13 轮：边缘开始的滑动不切 tab——从屏幕左边缘开始的右滑留给系统返回
-    /// （桥接层已把内容 pop 手势限定为边缘开始），否则边缘右滑会一边返回一边
-    /// 切 tab。tabContent 占满宽度，startLocation.x 就是离左边缘的距离。
+    /// 选中页在 allCases 里的下标（第 14 轮卡片滑动的原点）。
+    private var selectedIndex: Int {
+        VideoDetailContentTab.allCases.firstIndex(of: selection) ?? 0
+    }
+
+    private func index(of tab: VideoDetailContentTab) -> Int {
+        VideoDetailContentTab.allCases.firstIndex(of: tab) ?? 0
+    }
+
+    /// 该页是否应挂载/显示（第 14 轮卡片滑动）：当前页，或跟手滑动的目标页。
+    /// 只影响挂载与可见性（评论页构造、UIKit 子树隐藏），不影响可点性
+    /// （allowsHitTesting 仍只认 selection）与无障碍（仍只认 selection）。
+    private func isPageVisible(_ tab: VideoDetailContentTab) -> Bool {
+        tab == selection || tab == dragTarget
+    }
+
+    /// 该页的横向偏移（第 14 轮卡片滑动）：以选中页为原点，相邻页在左右各一页宽处，
+    /// 再叠加跟手偏移。简介→评论：简介向左滑出、评论从右滑入；评论→简介反之。
+    /// 点 tab 栏 / 画面滑动切 tab 时 dragOffset 为 0，selection 变化经上面的
+    /// .animation(value: selection) 驱动滑动——与跟手是同一条偏移路径。
+    private func pageOffset(for tab: VideoDetailContentTab) -> CGFloat {
+        CGFloat(index(of: tab) - selectedIndex) * layoutWidth + dragOffset
+    }
+
+    /// 横滑方向上相邻的页（第 14 轮）：dx<0 左滑进下一页，dx>0 右滑回上一页；
+    /// 边缘页无相邻页时返回 nil（不跟手、不切 tab）。
+    private func adjacentTab(for translationX: CGFloat) -> VideoDetailContentTab? {
+        let tabs = VideoDetailContentTab.allCases
+        let targetIndex = translationX < 0 ? selectedIndex + 1 : selectedIndex - 1
+        guard tabs.indices.contains(targetIndex) else { return nil }
+        return tabs[targetIndex]
+    }
+
+    /// 左右滑动切 tab（原版卡片效果，第 14 轮）：左滑进下一页（简介→评论），
+    /// 右滑回上一页（评论→简介）。经 toolbarSelection 切换，
+    /// onSelectionWillChange 照常触发。跟手：onChanged 里横向占优时实时更新
+    /// dragOffset，两页跟随手指；松手超过阈值（|dx|>60，沿用第 10 轮）完成
+    /// 切换、不足弹回。注意：手势挂在 tabContent 外层，各页内部的竖向滚动
+    /// （简介 UIScrollView、评论 UITableView）与横滑手势同时识别，竖滑由
+    /// 方向锁定过滤掉，不会误切。第 13 轮：边缘开始的滑动不切 tab——从屏幕
+    /// 左边缘开始的右滑留给系统返回（桥接层已把内容 pop 手势限定为边缘开始），
+    /// 否则边缘右滑会一边返回一边切 tab。tabContent 占满宽度，
+    /// startLocation.x 就是离左边缘的距离。
     private var tabSwipeGesture: some Gesture {
         DragGesture()
-            .onEnded { value in
+            .onChanged { value in
+                // 边缘开始的滑动不切 tab（留给系统返回），也不跟手。
                 guard value.startLocation.x > 30 else { return }
                 let translation = value.translation
-                guard abs(translation.width) > 60,
-                      abs(translation.width) > abs(translation.height)
-                else { return }
-                let tabs = VideoDetailContentTab.allCases
-                guard let index = tabs.firstIndex(of: selection) else { return }
-                let targetIndex = translation.width < 0 ? index + 1 : index - 1
-                guard tabs.indices.contains(targetIndex) else { return }
-                toolbarSelection.wrappedValue = tabs[targetIndex]
+                // 方向锁定：未判定时看总位移——横向占优且超过 8pt 判横滑，
+                // 竖向占优且超过 8pt 判竖滑；一旦锁定不再改判，避免竖向滚动
+                // 中途横向抖动，也避免横滑中途被竖向分量抢走。
+                if let isHorizontal = isHorizontalDrag {
+                    guard isHorizontal else { return }
+                } else if abs(translation.width) > abs(translation.height),
+                          abs(translation.width) > 8 {
+                    isHorizontalDrag = true
+                    dragSession += 1
+                } else if abs(translation.height) > abs(translation.width),
+                          abs(translation.height) > 8 {
+                    isHorizontalDrag = false
+                    return
+                } else {
+                    return
+                }
+                // 无相邻页的方向不跟手（边缘页再滑就是死胡同，dragOffset 归 0）。
+                guard let target = adjacentTab(for: translation.width) else {
+                    dragOffset = 0
+                    dragTarget = nil
+                    return
+                }
+                // 目标页先挂载（isPageVisible），再跟手滑入——否则滑入的是空白卡片。
+                dragTarget = target
+                // 夹取到一页宽：incoming 页最多滑到最终位置，不超滑。
+                dragOffset = min(max(translation.width, -layoutWidth), layoutWidth)
             }
+            .onEnded { value in
+                defer { isHorizontalDrag = nil }
+                // 非横滑（竖滑/斜滑/未判定）或边缘开始：不切 tab，弹回。
+                guard isHorizontalDrag == true,
+                      value.startLocation.x > 30
+                else {
+                    snapDragBack()
+                    return
+                }
+                let translation = value.translation
+                guard let target = adjacentTab(for: translation.width),
+                      abs(translation.width) > 60
+                else {
+                    snapDragBack()
+                    return
+                }
+                // 切换：selection 与 dragOffset 在同一个动画事务里一起变化——
+                // incoming 页从跟手位置平滑滑到最终位置，不跳变；dragTarget 随
+                // selection 一起清掉（incoming 页改由 selection 保持可见）。
+                withAnimation(.smooth(duration: 0.28)) {
+                    toolbarSelection.wrappedValue = target
+                    dragOffset = 0
+                    dragTarget = nil
+                }
+            }
+    }
+
+    /// 跟手偏移弹回 0（第 14 轮）：不足阈值 / 无相邻页 / 非横滑时不切 tab，
+    /// 页面滑回原位。dragTarget 延迟到动画结束后再清——立即清的话，正在滑出的
+    /// 卡片会在半路变空白（挂载被撤掉）；等它滑出屏幕（被 clipped 盖住）再清，
+    /// 用户看不到。会话编号校验防止旧的延迟清理误删新一次滑动的目标页。
+    private func snapDragBack() {
+        let session = dragSession
+        withAnimation(.smooth(duration: 0.28)) {
+            dragOffset = 0
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            guard dragSession == session else { return }
+            dragTarget = nil
+        }
     }
 
     private var toolbarSelection: Binding<VideoDetailContentTab> {
@@ -176,8 +286,11 @@ struct VideoDetailNativeContentTabView<Content: View>: View {
 
     @ViewBuilder
     private func page(for tab: VideoDetailContentTab) -> some View {
+        // 第 14 轮卡片滑动：跟手目标页也要挂载，否则滑动时滑入的是空白卡片。
+        // 只在拖动开始（横滑判定后）时挂载——用户已明确朝评论拖；不提前挂载，
+        // 用户永远不打开评论时不白白拉取评论数据；拖后弹回的，已拉取的数据留作缓存。
         let mountsPageContent = mountsSecondaryContent
-            || (tab == .comments && selection == .comments)
+            || (tab == .comments && isPageVisible(.comments))
         let pageContent = {
             content(tab, mountsPageContent)
         }
@@ -194,7 +307,7 @@ struct VideoDetailNativeContentTabView<Content: View>: View {
                         bottomInset: bottomInset + bottomToolbarReservedHeight + 16,
                         minimumPlayerHeight: interactiveMinimumPlayerHeight,
                         standardHorizontalInset: standardHorizontalInset,
-                        isActive: selection == tab,
+                        isActive: isPageVisible(tab),
                         showsBottomEdgeEffect: !hidesBottomToolbar,
                         scrollAdjustment: scrollAdjustment,
                         onScrollOffsetChange: onScrollOffsetChange,
@@ -216,7 +329,7 @@ struct VideoDetailNativeContentTabView<Content: View>: View {
                 topInset: topInset + topTabBarHeight,
                 minimumPlayerHeight: interactiveMinimumPlayerHeight,
                 bottomEdgeBlurEnabled: !hidesBottomToolbar,
-                isActiveContent: selection == tab,
+                isActiveContent: isPageVisible(tab),
                 contentRevision: contentRevision,
                 contentMountsSecondaryContent: mountsPageContent,
                 bottomInset: bottomInset + bottomToolbarReservedHeight + 16,
