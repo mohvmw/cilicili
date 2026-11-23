@@ -411,7 +411,7 @@ final class PlayerPlaybackClock: ObservableObject {
 
 /// 实时网速（播放界面左上角常驻显示）。viewModel 每秒采样本地 HLS 代理的累计
 /// 下载字节数算出速度后写 speedText；overlay 层直接观察它，不依赖父 view 的
-/// 重绘节奏。nil 时隐藏（暂停且无下载时）。
+/// 重绘节奏。暂停时也不隐藏（无下载时显示 0 KB/s）。
 final class PlayerNetworkSpeedModel: ObservableObject {
     @Published var speedText: String?
 }
@@ -470,7 +470,7 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
     @Published var isBuffering = false
     /// 实时网速模型（左上角常驻显示用）。viewModel 每秒采样本地代理算出速度后写
     /// networkSpeedModel.speedText；overlay 层直接观察该模型，不依赖父 view 的
-    /// 重绘节奏，保证每秒刷新。暂停且无下载时 speedText 为 nil（隐藏）。
+    /// 重绘节奏，保证每秒刷新。暂停时也常驻（无下载时为 0 KB/s）。
     let networkSpeedModel = PlayerNetworkSpeedModel()
     @Published var errorMessage: String?
     @Published var isPictureInPictureActive = false
@@ -6529,7 +6529,7 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
     /// 实时网速：每秒采样一次本地 HLS 代理的累计下载字节数，差量除以实际间隔即速度。
     /// 采样挂在 refreshPlaybackState 里（已有定时器，无需另起 Timer 管生命周期），
     /// 用实际间隔换算，所以刷新间隔不固定（缓冲 0.35s、正常 1.2s）也不影响准确性。
-    /// 只在播放/缓冲时显示；暂停且无下载时隐藏，避免常驻“0 KB/s”。
+    /// 暂停时也常驻显示（无下载时为 0 KB/s）。
     private func sampleNetworkSpeedIfNeeded() {
         let now = Date()
         if let lastDate = lastNetworkSpeedSampleDate,
@@ -6551,11 +6551,8 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
         let span = newest.date.timeIntervalSince(oldest.date)
         guard span >= 1.0 else { return }
         let bytesPerSecond = Double(max(newest.bytes - oldest.bytes, 0)) / span
-        if isPlaying || isBuffering {
-            networkSpeedModel.speedText = Self.formatNetworkSpeed(bytesPerSecond: bytesPerSecond)
-        } else {
-            networkSpeedModel.speedText = nil
-        }
+        // 常驻显示：暂停时也不置 nil（暂停也一直显示；无下载时显示 0 KB/s）。
+        networkSpeedModel.speedText = Self.formatNetworkSpeed(bytesPerSecond: bytesPerSecond)
     }
 
     private static func formatNetworkSpeed(bytesPerSecond: Double) -> String {

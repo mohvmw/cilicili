@@ -84,9 +84,10 @@ struct BiliPlayerSurfaceOverlayLayer: View {
             }
 
             // 实时网速：常驻左上角，控件隐藏时也不消失（与“正在缓冲”指示不同，
-            // 它是常驻层，allowsHitTesting(false) 不挡手势）。
+            // 它是常驻层，allowsHitTesting(false) 不挡手势）。只显示速度文字，
+            // 不带下载箭头；暂停时也常驻（speedText 暂停无下载时为 0 KB/s，不再置 nil）。
             if let speedText = networkSpeedModel.speedText {
-                Label(speedText, systemImage: "arrow.down")
+                Text(speedText)
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 8)
