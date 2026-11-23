@@ -1228,8 +1228,15 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         let status = item?.status
         return PlayerPlaybackSnapshot(
             currentTime: currentSeconds.isFinite && currentSeconds >= 0 ? currentSeconds : nil,
+            // 注意：这里刻意不缓存帧图（cachesFrameImage: false）。renderedVideoTime
+            // 的值只来自 copyPixelBuffer + itemTimeForDisplay，与是否缓存无关；
+            // 而缓存要做整帧 createCGImage 渲染（1080p 几毫秒到几十毫秒）。
+            // snapshot 在加载期间会被 loadedTimeRanges KVO 与 0.35s 定时器反复调用，
+            // 每次都渲染会占住主线程，拖进度条后点简介/点播放都会卡。
+            // lastVideoFrameImage 只在锁屏恢复时用，由 currentVideoFrameImage()
+            // 按需刷新（另有 recoveryFrameCacheTask 在首帧后补种），不需要在这里热刷新。
             renderedVideoTime: shouldReportRenderedVideoTimeForSeekRecovery
-                ? sampledRenderedVideoTime(cachesFrameImage: true)
+                ? sampledRenderedVideoTime(cachesFrameImage: false)
                 : nil,
             requiresRenderedVideoTimeForRecovery: shouldReportRenderedVideoTimeForSeekRecovery,
             duration: durationSeconds > 0 ? durationSeconds : durationHint,

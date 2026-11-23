@@ -6455,7 +6455,12 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
     private func handleEngineLoadingProgress(_ progress: Double) {
         let normalizedProgress = min(max(progress, 0), 0.98)
         guard !isTerminated else { return }
-        updateSeekBufferProgressIfNeeded(engine.snapshot(durationHint: durationHint))
+        // updateSeekBufferProgressIfNeeded 没有 pending 指标会直接返回，且它只用
+        // 快照的 bufferedRanges；没有指标时连快照都不取，避免每次 loadedTimeRanges
+        // 变化都走一次 snapshot（copyPixelBuffer + 区间换算）。
+        if pendingSeekRecoveryMetric != nil {
+            updateSeekBufferProgressIfNeeded(engine.snapshot(durationHint: durationHint))
+        }
         guard isPreparing
             || isBuffering
             || isUserSeeking
