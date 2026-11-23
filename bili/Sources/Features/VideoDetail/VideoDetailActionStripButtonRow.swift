@@ -6,37 +6,17 @@ struct VideoDetailActionStripButtonRow: View {
 
     let model: VideoDetailActionStripModel
     let layout: VideoDetailActionStripLayout
-    let onFollow: () -> Void
     let onLike: () -> Void
     let onCoin: () -> Void
     let onFavorite: () -> Void
     let usesPlainStyle: Bool
 
     var body: some View {
+        // 第 9 轮简介页紧凑化：去掉操作行最左边的头像列（原来是 model.owner 时渲染
+        // VideoDetailActionStripOwnerMenu、无 owner 时渲染占位头像）。
+        // UP 行已有头像 + 关注入口，头像列纯属重复；去掉后行内只剩点赞 / 投币 / 收藏 / •••，
+        // 从行首开始排，不留空位。列宽改由 4 列重算，见 VideoDetailActionStripLayout。
         HStack(spacing: layout.actionSpacing) {
-            Group {
-                if let owner = model.owner, owner.mid > 0 {
-                    VideoDetailActionStripOwnerMenu(
-                        owner: owner,
-                        side: layout.avatarImageSide,
-                        isFollowing: model.isFollowing,
-                        isMutatingFollow: model.isMutatingFollow,
-                        onFollow: onFollow
-                    )
-                } else {
-                    PlaybackDetailOwnerAvatarImage(
-                        urlString: nil,
-                        side: layout.avatarImageSide,
-                        pixelSize: VideoDetailActionStrip.Metrics.avatarPixelSize,
-                        showsShadow: false,
-                        showsBorder: false
-                    )
-                    .accessibilityHidden(true)
-                }
-            }
-            .frame(width: layout.avatarColumnWidth, height: layout.rowHeight)
-            .padding(.trailing, layout.avatarActionSpacing - layout.actionSpacing)
-
             VideoDetailActionStripIconButton(
                 accessibilityTitle: "点赞",
                 systemImage: "hand.thumbsup",

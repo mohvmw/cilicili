@@ -24,6 +24,15 @@ struct BiliPlayerViewContent: View {
         }
     }
 
+    /// 画面横滑调进度只在“竖视频且竖屏内嵌”时禁用：全屏始终启用；横屏视频
+    /// （embeddedAspectRatio >= 0.9）竖屏内嵌时恢复老行为（仍可横滑调进度）。
+    /// embeddedAspectRatio 是该播放器内嵌布局用的宽高比，与详情页 isPortraitVideo
+    /// 的 0.9 阈值同源（竖视频 < 0.9）。
+    private var allowsHorizontalSurfaceSeek: Bool {
+        context.configuration.isFullscreenActive
+            || context.configuration.embeddedAspectRatio >= 0.9
+    }
+
     private var surfaceGestureLayer: some View {
         BiliPlayerSurfaceGestureLayerHost(
             content: playbackSurface,
@@ -31,7 +40,7 @@ struct BiliPlayerViewContent: View {
             speedBoostActions: renderState.speedBoostActions,
             viewModel: context.viewModel,
             allowsDoubleTapPlaybackToggle: context.configuration.allowsDoubleTapPlaybackToggle,
-            allowsHorizontalSurfaceSeek: context.configuration.isFullscreenActive,
+            allowsHorizontalSurfaceSeek: allowsHorizontalSurfaceSeek,
             seekPreviewModel: context.seekPreviewModel,
             seekPreviewAPI: context.seekPreviewAPI,
             seekPreviewContext: context.seekPreviewContext,

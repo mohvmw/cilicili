@@ -37,7 +37,8 @@ struct VideoDetailSummaryCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        // 第 9 轮简介页紧凑化：UP 行 / 信息块 / 操作行之间的间距 12→8。
+        VStack(alignment: .leading, spacing: 8) {
             // UP 行不跟 showsVideoInfo 走：PGC 分集下标题由分集区自己出，
             // 但只要有 UP 数据就该显示 UP 行；没 UP 数据时行内 if let 本身不渲染。
             // （第 1 步曾把它和标题绑在同一个门里，showsVideoInfo 为 false 时

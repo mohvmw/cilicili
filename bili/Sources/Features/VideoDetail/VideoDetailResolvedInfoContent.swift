@@ -9,7 +9,8 @@ struct VideoDetailResolvedInfoContent: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        // 第 9 轮简介页紧凑化：标题 / 数据行 / 展开简介之间的间距 6→4。
+        VStack(alignment: .leading, spacing: 4) {
             titleRow
                 .commentCopyContextMenu(text: store.titleText, title: "复制标题")
 

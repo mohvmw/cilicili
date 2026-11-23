@@ -10,11 +10,14 @@ struct VideoDetailUploaderRow: View {
 
     var body: some View {
         if let owner = store.owner {
-            HStack(spacing: 10) {
+            // 第 9 轮简介页紧凑化：UP 行整体改小一号（头像 40→32、名字/关注 pill 字号各降一档），
+            // 只影响简介页顶部的 UP 行，不动关注行为本身。
+            HStack(spacing: 8) {
                 VideoOwnerRouteLink(owner: owner) {
                     PlaybackDetailOwnerAvatarImage(
                         urlString: owner.face?.normalizedBiliURL(),
-                        side: 40,
+                        side: 32,
+                        // pixelSize 保持 112：32pt 头像在 3x 屏上只需 96px，112 仍有余量，不必跟着改小。
                         pixelSize: VideoDetailActionStrip.Metrics.avatarPixelSize,
                         showsShadow: false,
                         showsBorder: false
@@ -22,10 +25,10 @@ struct VideoDetailUploaderRow: View {
                 }
                 .accessibilityLabel("\(owner.name)，查看个人空间")
 
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 1) {
                     VideoOwnerRouteLink(owner: owner) {
                         Text(owner.name)
-                            .font(.subheadline)
+                            .font(.footnote)
                             .fontWeight(.semibold)
                             .foregroundStyle(appTintColor)
                             .lineLimit(1)
@@ -34,7 +37,7 @@ struct VideoDetailUploaderRow: View {
                     // 粉丝数来自 UP 资料接口；没拿到（"粉丝 -"）时不显示，不编造数据。
                     if store.fanCountText != "粉丝 -" {
                         Text(store.fanCountText)
-                            .font(.caption)
+                            .font(.caption2)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
@@ -47,10 +50,10 @@ struct VideoDetailUploaderRow: View {
                         store.isFollowing ? "已关注" : "关注",
                         systemImage: store.isFollowing ? "checkmark" : "plus"
                     )
-                    .font(.subheadline)
+                    .font(.footnote)
                     .fontWeight(.medium)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
                     .background(
                         Capsule()
                             .fill(store.isFollowing

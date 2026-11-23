@@ -811,6 +811,10 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
             // 手势层单独提成一个 let 再放进 ZStack：body 整个表达式太大，
             // 把这个带 12 个参数的构造内联在里面会让编译器类型检查超时。
             // 只构造不挂载没有副作用，是否显示仍由下面的 shouldKeepChromeMounted 决定。
+            // 横滑调进度只在“竖视频且竖屏内嵌”时禁用：全屏始终启用；横屏视频
+            // （videoAspectRatio >= 0.9，与 contentModel.isPortraitVideo 的 0.9 阈值同源）
+            // 竖屏内嵌时恢复老行为（仍可横滑调进度）。videoAspectRatio 由 representable
+            // 从 contentModel 传入，默认 16/9，未拿到真实比例前按横屏处理。
             let gestureLayer = BiliPlayerSurfaceGestureLayerHost(
                 content: Color.clear
                     .frame(maxWidth: .infinity, maxHeight: .infinity),
@@ -818,7 +822,8 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
                 speedBoostActions: speedActions,
                 viewModel: viewModel,
                 allowsDoubleTapPlaybackToggle: true,
-                allowsHorizontalSurfaceSeek: renderContext.configuration.isFullscreenActive,
+                allowsHorizontalSurfaceSeek: renderContext.configuration.isFullscreenActive
+                    || videoAspectRatio >= 0.9,
                 seekPreviewModel: renderContext.seekPreviewModel,
                 seekPreviewAPI: renderContext.seekPreviewAPI,
                 seekPreviewContext: renderContext.seekPreviewContext,

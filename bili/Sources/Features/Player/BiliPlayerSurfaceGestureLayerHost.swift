@@ -7,7 +7,7 @@ struct BiliPlayerSurfaceGestureLayerHost<Content: View>: View {
     let viewModel: PlayerStateViewModel
     let allowsDoubleTapPlaybackToggle: Bool
     /// 画面横滑调进度开关（默认开，保持直播等未显式传值的调用方行为不变）；
-    /// 详情页竖屏内嵌时传 false，横屏/竖屏全屏时传 true。
+    /// 详情页只有竖视频在竖屏内嵌时传 false，横屏视频竖屏内嵌、横屏/竖屏全屏时传 true。
     /// 注意：必须是 var。Swift 的合成 memberwise init 会排除带默认值的 let 属性，
     /// 用 let 会导致调用方传 allowsHorizontalSurfaceSeek 时报 extra argument。
     var allowsHorizontalSurfaceSeek: Bool = true

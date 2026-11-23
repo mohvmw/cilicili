@@ -614,8 +614,11 @@ extension VideoDetailRotationBridgeViewController: UIGestureRecognizerDelegate {
         // 触点落在播放面内时，只放行向右且横向占优的滑动：竖屏画面横滑调进度已禁用，
         // 这种右滑就是系统返回；竖滑（亮度/音量）、左滑、长按 2x 仍被挡在返回手势之外。
         // 播放面外的触点沿用老行为（不做方向判断）。
+        // 第 9 轮：只针对竖视频（宽高比 < 0.9）。横屏视频的播放面恢复 round-8 之前
+        // 的行为——右滑不触发返回，画面横滑仍调进度。
         if let panGesture = gestureRecognizer as? UIPanGestureRecognizer,
            contentController.playerFrame.contains(panGesture.location(in: view)) {
+            guard contentController.isPortraitVideo else { return false }
             let velocity = panGesture.velocity(in: navigationController.view)
             guard velocity.x > 0 && abs(velocity.x) > abs(velocity.y) else { return false }
         }
@@ -629,10 +632,17 @@ extension VideoDetailRotationBridgeViewController: UIGestureRecognizerDelegate {
     ) -> Bool {
         guard isSystemBackGesture(gestureRecognizer) else { return true }
         guard !rotationCoordinator.isLandscape else { return false }
+        // 第 9 轮：只针对竖视频（宽高比 < 0.9）。横屏视频竖屏内嵌时，播放面上的触点
+        // 不交给系统返回手势，恢复 round-8 之前的行为（画面右滑不返回）；只有竖视频
+        // 才放行播放面触点。播放面外的触点沿用老行为。
         // 竖屏时播放面上的触点也交给系统返回手势：以前这里把播放面整个排除在外，
         // 从画面左边缘/画面内右滑都到不了 interactivePop / contentPop 手势，
         // 是竖屏无法右滑返回的直接原因。横屏仍排除（横屏返回走退出全屏），
         // 方向由 gestureRecognizerShouldBegin 里的速度判断再把关。
+        if !contentController.isPortraitVideo,
+           contentController.playerFrame.contains(touch.location(in: view)) {
+            return false
+        }
         return true
     }
 

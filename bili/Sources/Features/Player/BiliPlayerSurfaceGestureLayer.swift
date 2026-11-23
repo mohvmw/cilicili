@@ -5,8 +5,9 @@ struct BiliPlayerSurfaceGestureLayer<Content: View>: View {
     let clock: PlayerPlaybackClock
     let durationHint: TimeInterval?
     let canSeek: Bool
-    /// 画面横滑调进度只在全屏（含横屏全屏与竖屏全屏）时启用；竖屏内嵌时不挂载该手势，
-    /// 既禁掉竖屏横滑调进度，也不再抢系统侧滑返回。进度条控件本身的拖动不受影响。
+    /// 画面横滑调进度只在全屏（含横屏全屏与竖屏全屏）或横屏视频时启用；
+    /// 只有竖视频（宽高比 < 0.9）在竖屏内嵌时不挂载该手势，既禁掉竖屏横滑调进度，
+    /// 也不再抢系统侧滑返回。进度条控件本身的拖动不受影响。
     let allowsHorizontalSurfaceSeek: Bool
     let allowsDoubleTapPlaybackToggle: Bool
     let onSingleTap: () -> Void
