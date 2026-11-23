@@ -5,6 +5,9 @@ struct BiliPlayerSurfaceGestureLayer<Content: View>: View {
     let clock: PlayerPlaybackClock
     let durationHint: TimeInterval?
     let canSeek: Bool
+    /// 画面横滑调进度只在全屏（含横屏全屏与竖屏全屏）时启用；竖屏内嵌时不挂载该手势，
+    /// 既禁掉竖屏横滑调进度，也不再抢系统侧滑返回。进度条控件本身的拖动不受影响。
+    let allowsHorizontalSurfaceSeek: Bool
     let allowsDoubleTapPlaybackToggle: Bool
     let onSingleTap: () -> Void
     let onDoubleTap: () -> Void
@@ -39,8 +42,25 @@ struct BiliPlayerSurfaceGestureLayer<Content: View>: View {
 
     var body: some View {
         GeometryReader { proxy in
-            tappableContent(size: proxy.size)
-                .simultaneousGesture(
+            if allowsHorizontalSurfaceSeek {
+                baseGestures(size: proxy.size)
+                    .simultaneousGesture(horizontalSeekGesture(size: proxy.size))
+            } else {
+                baseGestures(size: proxy.size)
+            }
+        }
+        .accessibilityElement()
+        .accessibilityLabel("播放器画面")
+        .accessibilityIdentifier("ui.player.surface")
+        .accessibilityAction {
+            onSingleTap()
+        }
+    }
+
+    /// 除画面横滑调进度之外的全部画面手势：点击/双击、长按 2x、竖向亮度音量。
+    private func baseGestures(size: CGSize) -> some View {
+        tappableContent(size: size)
+            .simultaneousGesture(
                 LongPressGesture(minimumDuration: 0.28, maximumDistance: 80)
                     .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
                     .onChanged { value in
@@ -59,15 +79,7 @@ struct BiliPlayerSurfaceGestureLayer<Content: View>: View {
                         }
                     }
             )
-            .simultaneousGesture(horizontalSeekGesture(size: proxy.size))
-            .simultaneousGesture(verticalAdjustmentGesture(size: proxy.size))
-        }
-        .accessibilityElement()
-        .accessibilityLabel("播放器画面")
-        .accessibilityIdentifier("ui.player.surface")
-        .accessibilityAction {
-            onSingleTap()
-        }
+            .simultaneousGesture(verticalAdjustmentGesture(size: size))
     }
 
     @ViewBuilder
@@ -183,6 +195,7 @@ struct BiliPlayerSurfaceGestureLayer<Content: View>: View {
     }
 
     private func updateHorizontalSeek(for value: DragGesture.Value, size: CGSize) {
+        guard allowsHorizontalSurfaceSeek else { return }
         guard let duration = resolvedDuration, duration > 0 else { return }
         guard size.width > 0 else { return }
         let dx = value.translation.width

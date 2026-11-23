@@ -31,6 +31,7 @@ struct BiliPlayerViewContent: View {
             speedBoostActions: renderState.speedBoostActions,
             viewModel: context.viewModel,
             allowsDoubleTapPlaybackToggle: context.configuration.allowsDoubleTapPlaybackToggle,
+            allowsHorizontalSurfaceSeek: context.configuration.isFullscreenActive,
             seekPreviewModel: context.seekPreviewModel,
             seekPreviewAPI: context.seekPreviewAPI,
             seekPreviewContext: context.seekPreviewContext,

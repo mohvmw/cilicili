@@ -6,6 +6,9 @@ struct BiliPlayerSurfaceGestureLayerHost<Content: View>: View {
     let speedBoostActions: BiliPlayerSpeedBoostActions
     let viewModel: PlayerStateViewModel
     let allowsDoubleTapPlaybackToggle: Bool
+    /// 画面横滑调进度开关（默认开，保持直播等未显式传值的调用方行为不变）；
+    /// 详情页竖屏内嵌时传 false，横屏/竖屏全屏时传 true。
+    let allowsHorizontalSurfaceSeek: Bool = true
     @ObservedObject var seekPreviewModel: PlayerSeekPreviewModel
     let seekPreviewAPI: BiliAPIClient?
     let seekPreviewContext: PlayerSeekPreviewContext?
@@ -30,6 +33,7 @@ struct BiliPlayerSurfaceGestureLayerHost<Content: View>: View {
             clock: viewModel.playbackClock,
             durationHint: viewModel.displayDuration,
             canSeek: viewModel.canSeek,
+            allowsHorizontalSurfaceSeek: allowsHorizontalSurfaceSeek,
             allowsDoubleTapPlaybackToggle: allowsDoubleTapPlaybackToggle,
             onSingleTap: gestureActions.singleTap,
             onDoubleTap: gestureActions.doubleTap,

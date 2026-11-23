@@ -827,6 +827,7 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
                             speedBoostActions: speedActions,
                             viewModel: viewModel,
                             allowsDoubleTapPlaybackToggle: true,
+                            allowsHorizontalSurfaceSeek: renderContext.configuration.isFullscreenActive,
                             seekPreviewModel: renderContext.seekPreviewModel,
                             seekPreviewAPI: renderContext.seekPreviewAPI,
                             seekPreviewContext: renderContext.seekPreviewContext,

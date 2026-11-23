@@ -78,8 +78,8 @@ final class DanmakuKitTextCellModel: DanmakuCellModel {
         // 弹幕字体改黑边框（描边）代替阴影：描边按整个字形画，不用
         // NSAttributedString 的 .strokeWidth——它是按字形路径的每个子路径描边，
         // 中文字笔画靠得近，一个笔画的描边会进到另一个笔画里，字看起来发胖、
-        // 发空。改在绘制时做 8 向偏移（见 drawWithGlyphOutline）：黑色版向 8 个
-        // 方向各偏移 1 像素画一遍，再画彩色正文，描边只出现在字形外轮廓。
+        // 发空。改在绘制时做 16 向偏移（见 drawWithGlyphOutline）：黑色版向 16 个
+        // 方向各偏移 2 像素画一遍，再画彩色正文，描边只出现在字形外轮廓。
         let baseAttributes: [NSAttributedString.Key: Any] = [
             .font: font,
             .foregroundColor: color
@@ -119,7 +119,7 @@ final class DanmakuKitTextCellModel: DanmakuCellModel {
     }
 
     /// 生成用于描边的黑色版富文本：文字变黑；表情附件去图只占位（同 bounds、无图），
-    /// 避免描边时表情图片重影 8 次。占位附件仍按 bounds 占宽，版式与正文一致。
+    /// 避免描边时表情图片重影 16 次。占位附件仍按 bounds 占宽，版式与正文一致。
     private static func outlineCopy(of attributedText: NSAttributedString) -> NSAttributedString {
         let copy = NSMutableAttributedString(attributedString: attributedText)
         let fullRange = NSRange(location: 0, length: copy.length)
@@ -138,18 +138,24 @@ final class DanmakuKitTextCellModel: DanmakuCellModel {
         return copy
     }
 
-    /// 按整个字形描边（非按笔画）：黑色版向 8 个方向各偏移 1 像素画一遍，再画彩色正文。
-    /// 8 向偏移是把整个字形向外扩 1 像素，描边只出现在字形外轮廓，不会吃进笔画间隙，
-    /// 与 Metal 后端的 1 像素黑边观感一致。
+    /// 描边偏移：16 个方向、半径 2 物理像素。半径从 1 像素提到 2 像素后，
+    /// 8 个方向的采样间距变大（相邻偏移点相距约 1.5 像素），描边边缘会不够
+    /// 均匀；16 向（每 22.5° 一个，含原来的 8 个方向）描边更均匀平滑。
+    /// 半径是物理像素：除以屏幕 scale 后才是点数。
+    private static func outlineOffsets() -> [CGPoint] {
+        let radius = 2.0 / UIScreen.main.scale
+        return (0..<16).map { index in
+            let angle = Double(index) * .pi / 8
+            return CGPoint(x: radius * CGFloat(cos(angle)), y: radius * CGFloat(sin(angle)))
+        }
+    }
+
+    /// 按整个字形描边（非按笔画）：黑色版向 16 个方向各偏移 2 像素画一遍，再画彩色正文。
+    /// 16 向偏移是把整个字形向外扩 2 像素，描边只出现在字形外轮廓，不会吃进笔画间隙，
+    /// 与 Metal 后端的 2 像素黑边观感一致。
     static func drawWithGlyphOutline(_ attributedText: NSAttributedString, at origin: CGPoint) {
-        let d = 1.0 / UIScreen.main.scale
         let outline = outlineCopy(of: attributedText)
-        let offsets: [CGPoint] = [
-            CGPoint(x: -d, y: -d), CGPoint(x: 0, y: -d), CGPoint(x: d, y: -d),
-            CGPoint(x: -d, y: 0),                          CGPoint(x: d, y: 0),
-            CGPoint(x: -d, y: d),  CGPoint(x: 0, y: d),  CGPoint(x: d, y: d),
-        ]
-        for offset in offsets {
+        for offset in outlineOffsets() {
             outline.draw(at: CGPoint(x: origin.x + offset.x, y: origin.y + offset.y))
         }
         attributedText.draw(at: origin)
@@ -157,14 +163,8 @@ final class DanmakuKitTextCellModel: DanmakuCellModel {
 
     /// 同上，绘制到指定矩形内（同步层渲染到位图时用）。
     static func drawWithGlyphOutline(_ attributedText: NSAttributedString, in rect: CGRect) {
-        let d = 1.0 / UIScreen.main.scale
         let outline = outlineCopy(of: attributedText)
-        let offsets: [CGPoint] = [
-            CGPoint(x: -d, y: -d), CGPoint(x: 0, y: -d), CGPoint(x: d, y: -d),
-            CGPoint(x: -d, y: 0),                          CGPoint(x: d, y: 0),
-            CGPoint(x: -d, y: d),  CGPoint(x: 0, y: d),  CGPoint(x: d, y: d),
-        ]
-        for offset in offsets {
+        for offset in outlineOffsets() {
             outline.draw(in: rect.offsetBy(dx: offset.x, dy: offset.y))
         }
         attributedText.draw(in: rect)
@@ -223,7 +223,7 @@ final class DanmakuKitTextCellModel: DanmakuCellModel {
         color: UIColor,
         missingImageURLs: inout [URL]
     ) -> NSAttributedString {
-        // 表情 token 与附件统一用黑边框（与正文一致，绘制时 8 向偏移），不再用阴影。
+        // 表情 token 与附件统一用黑边框（与正文一致，绘制时 16 向偏移），不再用阴影。
         let strokeAttributes: [NSAttributedString.Key: Any] = [
             .font: font,
             .foregroundColor: color

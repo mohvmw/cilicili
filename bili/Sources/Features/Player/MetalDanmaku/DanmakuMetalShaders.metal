@@ -78,9 +78,11 @@ fragment float4 danmakuGlyphFragment(DanmakuVertex in [[stage_in]],
     float2 high = in.uvBounds.xy + in.uvBounds.zw - pixel * 0.5f;
     float fill = atlas.sample(glyphSampler, clamp(in.uv, low, high)).r;
     float outline = fill;
-    for (int y = -1; y <= 1; ++y)
-        for (int x = -1; x <= 1; ++x)
+    for (int y = -2; y <= 2; ++y)
+        for (int x = -2; x <= 2; ++x)
             outline = max(outline, atlas.sample(glyphSampler, clamp(in.uv + float2(x,y)*pixel, low, high)).r);
-    // Premultiplied alpha: a black one-pixel outline behind the colored glyph.
+    // Premultiplied alpha: a black two-pixel outline behind the colored glyph.
+    // 2 texels stay inside the atlas glyph cell: each glyph is rasterized with
+    // 3 pixels of padding (DanmakuGlyphAtlas.paddingPixels), so no neighbour bleeds in.
     return float4(in.color.rgb * fill * in.color.a, outline * in.color.a);
 }
