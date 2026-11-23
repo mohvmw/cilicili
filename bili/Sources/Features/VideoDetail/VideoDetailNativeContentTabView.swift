@@ -44,6 +44,12 @@ struct VideoDetailNativeContentTabView<Content: View>: View {
     /// 落位动画结束（切换或弹回）为止。点按经 tabContent 的 allowsHitTesting 拦，
     /// 竖向滚动经透传到两页滚动容器的 isScrollEnabled 拦。
     @State private var suppressesPageInteractions = false
+    /// 拖动期间禁止点按的共享状态（第 17 轮）：第一下 onChanged 就置上，松手落位
+    /// 后清掉。点按处理（相关视频卡片、评论行）在触发时读它——allowsHitTesting
+    /// 拦不住 in-flight 的 Button（见 VideoDetailTapSuppression）。
+    /// @StateObject 持有唯一实例，引用稳定；@Published 变化会让本视图重渲染，
+    /// 以便 allowsHitTesting 同步更新。
+    @StateObject private var tapSuppression = VideoDetailTapSuppression()
     var contentRevision: Int = 0
     var onOpenCommentComposer: (() -> Void)?
     var onSelectionWillChange: ((VideoDetailContentTab) -> Void)? = nil
@@ -96,14 +102,23 @@ struct VideoDetailNativeContentTabView<Content: View>: View {
                     // 第 15 轮：横滑锁定/落位期间禁止两页内的点按（相关视频卡片、
                     // 按钮等）。手势挂在 tabContent 外层（不在页上），关掉页的
                     // hit testing 不影响拖动本身。
-                    .allowsHitTesting(selection == tab && !suppressesPageInteractions)
+                    // 第 17 轮：点按抑制提前到第一下拖动（tapSuppression 在
+                    // onChanged 一开始就置上）。allowsHitTesting 只能拦新触点，
+                    // in-flight 的 Button 靠各点按处理读 tapSuppression 拦；
+                    // 这里多拦一层，顺带挡住拖动中另一根手指的新点按。
+                    .allowsHitTesting(selection == tab && !suppressesPageInteractions && !tapSuppression.isSuppressed)
                     .accessibilityHidden(selection != tab)
             }
         }
+        // 第 17 轮：把点按抑制状态透传给两页内容（纯 SwiftUI 的非 live 分支
+        // 直接继承；live 分支的 UIHostingController 需在 scrollContent 里
+        // 显式注入，评论页经 VideoDetailCommentsPageContext 透传）。
+        .environment(\.videoDetailTapSuppression, tapSuppression)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
         .animation(.smooth(duration: 0.28), value: selection)
-        // 左右滑动切换 tab（原版卡片效果，第 14 轮）：横向占优的 DragGesture，
+        // 左右滑动切换 tab（原版卡片效果，第 14 轮）：横向分量达到竖向 0.7 倍
+        // 即判横滑的 DragGesture（第 17 轮放宽，斜滑也能切），
         // 用 simultaneous 挂在内容区外层，不抢竖向滚动——竖滑仍由各页自己的
         // 滚动视图接管。跟手时两页实时跟随手指；松手超过阈值完成切换、不足弹回。
         .simultaneousGesture(tabSwipeGesture)
@@ -145,7 +160,7 @@ struct VideoDetailNativeContentTabView<Content: View>: View {
 
     /// 左右滑动切 tab（原版卡片效果，第 14 轮）：左滑进下一页（简介→评论），
     /// 右滑回上一页（评论→简介）。经 toolbarSelection 切换，
-    /// onSelectionWillChange 照常触发。跟手：onChanged 里横向占优时实时更新
+    /// onSelectionWillChange 照常触发。跟手：onChanged 里横滑锁定后实时更新
     /// dragOffset，两页跟随手指；松手超过阈值（|dx|>60，沿用第 10 轮）完成
     /// 切换、不足弹回。注意：手势挂在 tabContent 外层，各页内部的竖向滚动
     /// （简介 UIScrollView、评论 UITableView）与横滑手势同时识别，竖滑由
@@ -158,23 +173,41 @@ struct VideoDetailNativeContentTabView<Content: View>: View {
             .onChanged { value in
                 // 边缘开始的滑动不切 tab（留给系统返回），也不跟手。
                 guard value.startLocation.x > 30 else { return }
+                // 第 17 轮：第一下 onChanged（任何方向、位移很小）就抑制点按。
+                // 纯点按不产生 onChanged（DragGesture 默认 minimumDistance 10pt），
+                // 所以不会误伤正常点击。点按抑制与滚动抑制拆开：点按抑制一有拖动
+                // 就开；滚动抑制（isScrollEnabled=false）仍只在横滑锁定后开，
+                // 竖向滚动不受影响。只在状态变化时赋值，避免 @Published 每次
+                // onChanged 都触发重渲染。
+                if !tapSuppression.isSuppressed { tapSuppression.isSuppressed = true }
                 let translation = value.translation
-                // 方向锁定：未判定时看总位移——横向占优且超过 8pt 判横滑，
-                // 竖向占优且超过 8pt 判竖滑；一旦锁定不再改判，避免竖向滚动
-                // 中途横向抖动，也避免横滑中途被竖向分量抢走。
+                // 方向锁定（第 17 轮改）：未判定时看总位移——量级门仍是 8pt，
+                // 但横滑判定放宽：横向分量达到竖向分量的 0.7 倍即判横滑
+                // （约 55° 以内都算横滑，斜滑也能切 tab）。竖滑用互补条件，
+                // 两者恰好互斥、无死区：|dx| > 0.7|dy| 与 |dy| > |dx|/0.7
+                // 必居其一。注意不能只放宽横滑条件而保留旧竖滑条件
+                // （|dy| > |dx|）：45°~55° 的斜滑会先撞上竖滑门（|dy| 先到 8pt）
+                // 被判成竖滑，放宽就白做了。正常竖向滚动带少量横向漂移
+                // （通常 <30°）不会误切；漂到 55° 以内按用户要求算横滑。
+                // 一旦锁定不再改判，避免竖向滚动中途横向抖动，也避免横滑
+                // 中途被竖向分量抢走。
                 if let isHorizontal = isHorizontalDrag {
                     guard isHorizontal else { return }
-                } else if abs(translation.width) > abs(translation.height),
-                          abs(translation.width) > 8 {
-                    isHorizontalDrag = true
-                    dragSession += 1
-                    // 第 15 轮：横滑锁定开始，禁止两页内的点按与竖向滚动，直到
-                    // 落位动画结束（切换或弹回，见 onEnded / snapDragBack 的延迟复位）。
-                    suppressesPageInteractions = true
-                } else if abs(translation.height) > abs(translation.width),
-                          abs(translation.height) > 8 {
-                    isHorizontalDrag = false
-                    return
+                } else if max(abs(translation.width), abs(translation.height)) > 8 {
+                    if abs(translation.width) > abs(translation.height) * 0.7 {
+                        isHorizontalDrag = true
+                        dragSession += 1
+                        // 第 15 轮：横滑锁定开始，禁止两页内的点按与竖向滚动，直到
+                        // 落位动画结束（切换或弹回，见 onEnded / snapDragBack 的延迟复位）。
+                        suppressesPageInteractions = true
+                    } else {
+                        isHorizontalDrag = false
+                        // 竖滑：竖向滚动由滚动视图自己取消点按（竖向 pan 手势会
+                        // 取消 Button 的按压），点按抑制在这里就恢复——竖滑结束
+                        // 后点按立即恢复，不留 0.35s 死区。
+                        tapSuppression.isSuppressed = false
+                        return
+                    }
                 } else {
                     return
                 }
@@ -220,6 +253,8 @@ struct VideoDetailNativeContentTabView<Content: View>: View {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                     guard dragSession == session else { return }
                     suppressesPageInteractions = false
+                    // 第 17 轮：同处恢复点按抑制（拖动期间点按处理一直在读它）。
+                    tapSuppression.isSuppressed = false
                 }
             }
     }
@@ -238,6 +273,8 @@ struct VideoDetailNativeContentTabView<Content: View>: View {
             guard dragSession == session else { return }
             dragTarget = nil
             suppressesPageInteractions = false
+            // 第 17 轮：同处恢复点按抑制。
+            tapSuppression.isSuppressed = false
         }
     }
 
@@ -333,6 +370,10 @@ struct VideoDetailNativeContentTabView<Content: View>: View {
                         // showsBottomEdgeEffect 之前，调用时也必须在它之前，
                         // 否则编译报错（argument must precede）。
                         suppressesScrolling: suppressesPageInteractions,
+                        // 第 17 轮：拖动期间禁止点按的共享状态（引用类型，声明
+                        // 在 suppressesScrolling 之后、showsBottomEdgeEffect
+                        // 之前，调用顺序与声明一致）。
+                        tapSuppression: tapSuppression,
                         showsBottomEdgeEffect: !hidesBottomToolbar,
                         scrollAdjustment: scrollAdjustment,
                         onScrollOffsetChange: onScrollOffsetChange,
@@ -361,6 +402,9 @@ struct VideoDetailNativeContentTabView<Content: View>: View {
                 standardHorizontalInset: standardHorizontalInset,
                 // 第 15 轮：横滑锁定/落位期间禁止简介页竖向滚动。
                 suppressesScrolling: suppressesPageInteractions,
+                // 第 17 轮：拖动期间禁止点按的共享状态（引用类型，声明在
+                // suppressesScrolling 之后、content 之前，调用顺序与声明一致）。
+                tapSuppression: tapSuppression,
                 content: pageContent
             )
         } else {
@@ -400,6 +444,10 @@ private struct VideoDetailInteractiveScrollingTabPage<Content: View>: View {
     /// 横滑锁定/落位期间禁止竖向滚动（第 15 轮）。必须是 var：合成 memberwise
     /// init 会排除带默认值的 let，写 let 会导致调用方编译不过。
     var suppressesScrolling: Bool = false
+    /// 拖动期间禁止点按的共享状态（第 17 轮，引用类型）。必须是 var：
+    /// 与 suppressesScrolling 同理。声明在 suppressesScrolling 之后、
+    /// content 之前，调用顺序与声明一致。
+    var tapSuppression: VideoDetailTapSuppression? = nil
     let content: () -> Content
 
     var body: some View {
@@ -420,6 +468,7 @@ private struct VideoDetailInteractiveScrollingTabPage<Content: View>: View {
                 bottomInset: bottomInset,
                 standardHorizontalInset: standardHorizontalInset,
                 suppressesScrolling: suppressesScrolling,
+                tapSuppression: tapSuppression,
                 content: content
             )
         }
@@ -445,6 +494,10 @@ private struct VideoDetailInteractiveScrollHost<Content: View>: UIViewRepresenta
     /// 横滑锁定/落位期间禁止竖向滚动（第 15 轮）。必须是 var：合成 memberwise
     /// init 会排除带默认值的 let，写 let 会导致调用方编译不过。
     var suppressesScrolling: Bool = false
+    /// 拖动期间禁止点按的共享状态（第 17 轮，引用类型）。必须是 var：
+    /// 与 suppressesScrolling 同理。声明在 suppressesScrolling 之后、
+    /// content 之前，调用顺序与声明一致。
+    var tapSuppression: VideoDetailTapSuppression? = nil
     let content: () -> Content
 
     func makeCoordinator() -> Coordinator {
@@ -556,6 +609,10 @@ private struct VideoDetailInteractiveScrollHost<Content: View>: UIViewRepresenta
                 max(viewportHeight - bottomInset, 0)
             )
             .environment(\.videoDetailStandardHorizontalInset, standardHorizontalInset)
+            // 第 17 轮：UIHostingController 不继承外层 SwiftUI 环境，这里显式
+            // 注入点按抑制状态。注入的是引用对象（身份不变），原地变值后卡片
+            // 的点按处理在触发时读到最新值，不需要 rootView 重建。
+            .environment(\.videoDetailTapSuppression, tapSuppression)
         )
     }
 

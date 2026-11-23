@@ -113,6 +113,11 @@ private struct VideoRouteTapLink<Label: View>: View {
     let prewarmVideoRoute: ((VideoItem) -> Void)?
     let onOpen: (() -> Void)?
     @ViewBuilder let label: () -> Label
+    /// 第 17 轮：拖动期间禁止点按的共享状态（由详情页 tab view 提供，
+    /// 其他地方为 nil = 不抑制）。简介/评论切换时页面跟手滑动，手指全程
+    /// 停在同一张卡片上，松手时 Button 照常触发——allowsHitTesting 拦不住
+    /// in-flight 的按压，所以在触发时拦。
+    @Environment(\.videoDetailTapSuppression) private var tapSuppression
 
     var body: some View {
         Button(action: open) {
@@ -124,6 +129,8 @@ private struct VideoRouteTapLink<Label: View>: View {
     }
 
     private func open() {
+        // 第 17 轮：拖动刚结束时松手触发的点按直接跳过（页面还在落位动画里）。
+        guard tapSuppression?.isSuppressed != true else { return }
         onOpen?()
         prewarmVideoRoute?(video)
         openVideo(video)

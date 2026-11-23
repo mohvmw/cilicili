@@ -69,6 +69,9 @@ struct VideoDetailCommentsTableViewHost: UIViewRepresentable {
             minimumPlayerHeight: context.minimumPlayerHeight,
             isActive: context.isActive,
             suppressesScrolling: context.suppressesScrolling,
+            // 第 17 轮：拖动期间禁止点按的共享状态（声明在 suppressesScrolling
+            // 之后、showsBottomEdgeEffect 之前，调用顺序与声明一致）。
+            tapSuppression: context.tapSuppression,
             showsBottomEdgeEffect: context.showsBottomEdgeEffect,
             onScrollOffsetChange: context.onScrollOffsetChange,
             onScrollPhaseChange: context.onScrollPhaseChange
@@ -230,6 +233,10 @@ extension VideoDetailCommentsTableViewHost {
             /// 横滑锁定/落位期间禁止评论列表竖向滚动（第 15 轮）。必须是 var：
             /// 合成 memberwise init 会排除带默认值的 let。
             var suppressesScrolling: Bool = false
+            /// 拖动期间禁止点按的共享状态（第 17 轮，引用类型）。必须是 var：
+            /// 与 suppressesScrolling 同理。声明在 suppressesScrolling 之后、
+            /// showsBottomEdgeEffect 之前，调用顺序与声明一致。
+            var tapSuppression: VideoDetailTapSuppression? = nil
             let showsBottomEdgeEffect: Bool
             let onScrollOffsetChange: ((VideoDetailContentTab, CGFloat) -> Void)?
             let onScrollPhaseChange: ((VideoDetailContentTab, ScrollPhase) -> Void)?
@@ -799,6 +806,10 @@ extension VideoDetailCommentsTableViewHost {
                 .environment(\.commentLikeTarget, environment.commentLikeTarget)
                 .environment(\.openAppURLAction, environment.openAppURL)
                 .environment(\.commentContentOwnerMID, props.ownerMID)
+                // 第 17 轮：显式注入点按抑制状态（UIKit 宿主不继承外层环境）。
+                // 注入的是引用对象（身份不变），原地变值后评论行的点按处理
+                // 在触发时读到最新值，不需要 cell 重建。
+                .environment(\.videoDetailTapSuppression, props.tapSuppression)
         }
 
         private var emptyStateMinimumHeight: CGFloat {
