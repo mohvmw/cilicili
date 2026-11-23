@@ -68,6 +68,7 @@ struct VideoDetailCommentsTableViewHost: UIViewRepresentable {
             bottomInset: context.bottomInset,
             minimumPlayerHeight: context.minimumPlayerHeight,
             isActive: context.isActive,
+            suppressesScrolling: context.suppressesScrolling,
             showsBottomEdgeEffect: context.showsBottomEdgeEffect,
             onScrollOffsetChange: context.onScrollOffsetChange,
             onScrollPhaseChange: context.onScrollPhaseChange
@@ -226,6 +227,9 @@ extension VideoDetailCommentsTableViewHost {
             let bottomInset: CGFloat
             let minimumPlayerHeight: CGFloat
             let isActive: Bool
+            /// 横滑锁定/落位期间禁止评论列表竖向滚动（第 15 轮）。必须是 var：
+            /// 合成 memberwise init 会排除带默认值的 let。
+            var suppressesScrolling: Bool = false
             let showsBottomEdgeEffect: Bool
             let onScrollOffsetChange: ((VideoDetailContentTab, CGFloat) -> Void)?
             let onScrollPhaseChange: ((VideoDetailContentTab, ScrollPhase) -> Void)?
@@ -360,6 +364,9 @@ extension VideoDetailCommentsTableViewHost {
                 right: 0
             )
             view.contentOffset = CGPoint(x: 0, y: -appliedTopInset)
+            // 第 15 轮：横滑锁定期间创建即禁滚（评论页在拖动开始时挂载，此时
+            // 标志已为 true）；update 里随标志变化同步开关。
+            view.isScrollEnabled = !props.suppressesScrolling
             view.configureBottomEdgeEffect(
                 enabled: props.showsBottomEdgeEffect,
                 isActiveContent: props.isActive
@@ -401,6 +408,11 @@ extension VideoDetailCommentsTableViewHost {
             // 视频切换会换一个 render store：重订阅并整表刷新。
             let storeChanged = props.store !== self.props.store
             self.props = props
+            // 第 15 轮：横滑锁定/落位期间禁滚。UIKit 里中途置 isScrollEnabled=false
+            // 会立即停掉正在进行的滚动（光关 hit testing 拦不住已在进行的滚动）。
+            // 评论列表默认可滚（从未在别处关过 isScrollEnabled），恢复 true 不会
+            // 把原本就关掉滚动的页面误打开。
+            tableView?.isScrollEnabled = !props.suppressesScrolling
             tableView?.configureBottomEdgeEffect(
                 enabled: props.showsBottomEdgeEffect,
                 isActiveContent: props.isActive

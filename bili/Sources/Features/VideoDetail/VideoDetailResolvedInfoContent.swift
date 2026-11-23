@@ -55,7 +55,11 @@ struct VideoDetailResolvedInfoContent: View {
 
     private var expandableTitle: some View {
         HStack(alignment: .top, spacing: 6) {
+            // 第 15 轮：点标题本身也能展开/收回简介（原来只有点右侧小 chevron 才行）。
+            // 与外层 .commentCopyContextMenu 不冲突——点按展开、长按复制标题。
+            // 没简介内容时展开块本身不渲染，点标题无可见变化，不用另加判断。
             VideoDetailInfoTitleText(text: presentation.titleText, isExpanded: isExpanded)
+                .onTapGesture(perform: toggleExpansion)
 
             Button(action: toggleExpansion) {
                 Image(systemName: isExpanded ? "chevron.up" : "chevron.down")

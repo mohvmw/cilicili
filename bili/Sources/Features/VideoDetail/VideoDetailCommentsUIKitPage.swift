@@ -15,6 +15,9 @@ struct VideoDetailCommentsPageContext {
     let minimumPlayerHeight: CGFloat
     let standardHorizontalInset: CGFloat
     let isActive: Bool
+    /// 横滑锁定/落位期间禁止评论列表竖向滚动（第 15 轮）。必须是 var：合成
+    /// memberwise init 会排除带默认值的 let，写 let 会导致调用方编译不过。
+    var suppressesScrolling: Bool = false
     /// 底部软边缘（.soft + 工具栏交互），与简介页滚动容器保持一致。
     let showsBottomEdgeEffect: Bool
     let scrollAdjustment: VideoDetailScrollAdjustment?

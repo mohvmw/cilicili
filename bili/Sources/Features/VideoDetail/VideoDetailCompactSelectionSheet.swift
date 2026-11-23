@@ -97,6 +97,7 @@ extension VideoDetailCompactSelectionItem {
 /// 第 10 轮合集行再紧凑：标题 headline→subheadline、当前项 subheadline→footnote、
 /// 计数 caption→caption2、行高 54→46、横向内边距 12→10、圆角 12→10、列间距 10→8；
 /// chevron 已是最小的 caption2，不再缩小。
+/// 第 15 轮边框再小一点：圆角 10→8、行高 46→40、横向内边距 10→8；字号与文案不动。
 /// 注意：本按钮由合集（VideoDetailUgcSeasonSection）、分集（VideoDetailPgcEpisodeSection）、
 /// 分P（VideoDetailPageMenu）三处共用，收紧后三者同步变小；展开后的分集列表
 ///（VideoDetailCompactSelectionSheet / VideoDetailCompactSelectionRow）不在本轮改动范围。
@@ -107,7 +108,7 @@ struct VideoDetailCompactEntryButton: View {
     let accessibilityIdentifier: String
     @Binding var showsSheet: Bool
 
-    private let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+    private let shape = RoundedRectangle(cornerRadius: 8, style: .continuous)
 
     private var currentItem: VideoDetailCompactSelectionItem? {
         items.first { $0.isSelected } ?? items.first
@@ -140,8 +141,8 @@ struct VideoDetailCompactEntryButton: View {
                     .foregroundStyle(.secondary)
                     .accessibilityHidden(true)
             }
-            .padding(.horizontal, 10)
-            .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
+            .padding(.horizontal, 8)
+            .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
             .background(Color(.secondarySystemGroupedBackground), in: shape)
             .overlay {
                 shape.strokeBorder(Color(.separator).opacity(0.16), lineWidth: 0.8)

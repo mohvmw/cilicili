@@ -40,6 +40,10 @@ struct VideoDetailNativeContentTabView<Content: View>: View {
     /// 跟手会话编号（第 14 轮）：每次横滑判定开始时 +1。弹回的延迟清理用它
     /// 校验，避免旧的延迟清理误删新一次滑动的目标页。
     @State private var dragSession = 0
+    /// 横滑锁定期间禁止两页内的其他动作（第 15 轮）：从横滑方向锁定开始，到松手后
+    /// 落位动画结束（切换或弹回）为止。点按经 tabContent 的 allowsHitTesting 拦，
+    /// 竖向滚动经透传到两页滚动容器的 isScrollEnabled 拦。
+    @State private var suppressesPageInteractions = false
     var contentRevision: Int = 0
     var onOpenCommentComposer: (() -> Void)?
     var onSelectionWillChange: ((VideoDetailContentTab) -> Void)? = nil
@@ -89,7 +93,10 @@ struct VideoDetailNativeContentTabView<Content: View>: View {
             ForEach(VideoDetailContentTab.allCases) { tab in
                 page(for: tab)
                     .offset(x: pageOffset(for: tab))
-                    .allowsHitTesting(selection == tab)
+                    // 第 15 轮：横滑锁定/落位期间禁止两页内的点按（相关视频卡片、
+                    // 按钮等）。手势挂在 tabContent 外层（不在页上），关掉页的
+                    // hit testing 不影响拖动本身。
+                    .allowsHitTesting(selection == tab && !suppressesPageInteractions)
                     .accessibilityHidden(selection != tab)
             }
         }
@@ -161,6 +168,9 @@ struct VideoDetailNativeContentTabView<Content: View>: View {
                           abs(translation.width) > 8 {
                     isHorizontalDrag = true
                     dragSession += 1
+                    // 第 15 轮：横滑锁定开始，禁止两页内的点按与竖向滚动，直到
+                    // 落位动画结束（切换或弹回，见 onEnded / snapDragBack 的延迟复位）。
+                    suppressesPageInteractions = true
                 } else if abs(translation.height) > abs(translation.width),
                           abs(translation.height) > 8 {
                     isHorizontalDrag = false
@@ -198,10 +208,18 @@ struct VideoDetailNativeContentTabView<Content: View>: View {
                 // 切换：selection 与 dragOffset 在同一个动画事务里一起变化——
                 // incoming 页从跟手位置平滑滑到最终位置，不跳变；dragTarget 随
                 // selection 一起清掉（incoming 页改由 selection 保持可见）。
+                // 第 15 轮：落位动画结束后再恢复两页内的点按与竖向滚动（0.35s =
+                // 动画 0.28s + 余量，与 snapDragBack 同 pattern）。会话编号校验：
+                // 落位期间若又开始一次新的横滑，旧的延迟清理不误删新锁定的禁止态。
+                let session = dragSession
                 withAnimation(.smooth(duration: 0.28)) {
                     toolbarSelection.wrappedValue = target
                     dragOffset = 0
                     dragTarget = nil
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    guard dragSession == session else { return }
+                    suppressesPageInteractions = false
                 }
             }
     }
@@ -210,6 +228,7 @@ struct VideoDetailNativeContentTabView<Content: View>: View {
     /// 页面滑回原位。dragTarget 延迟到动画结束后再清——立即清的话，正在滑出的
     /// 卡片会在半路变空白（挂载被撤掉）；等它滑出屏幕（被 clipped 盖住）再清，
     /// 用户看不到。会话编号校验防止旧的延迟清理误删新一次滑动的目标页。
+    /// 第 15 轮：同一处延迟复位也恢复两页内的点按与竖向滚动（横滑锁定期间禁止）。
     private func snapDragBack() {
         let session = dragSession
         withAnimation(.smooth(duration: 0.28)) {
@@ -218,6 +237,7 @@ struct VideoDetailNativeContentTabView<Content: View>: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
             guard dragSession == session else { return }
             dragTarget = nil
+            suppressesPageInteractions = false
         }
     }
 
@@ -311,7 +331,9 @@ struct VideoDetailNativeContentTabView<Content: View>: View {
                         showsBottomEdgeEffect: !hidesBottomToolbar,
                         scrollAdjustment: scrollAdjustment,
                         onScrollOffsetChange: onScrollOffsetChange,
-                        onScrollPhaseChange: onScrollPhaseChange
+                        onScrollPhaseChange: onScrollPhaseChange,
+                        // 第 15 轮：横滑锁定/落位期间禁止评论列表竖向滚动。
+                        suppressesScrolling: suppressesPageInteractions
                     )
                 )
             } else {
@@ -334,6 +356,8 @@ struct VideoDetailNativeContentTabView<Content: View>: View {
                 contentMountsSecondaryContent: mountsPageContent,
                 bottomInset: bottomInset + bottomToolbarReservedHeight + 16,
                 standardHorizontalInset: standardHorizontalInset,
+                // 第 15 轮：横滑锁定/落位期间禁止简介页竖向滚动。
+                suppressesScrolling: suppressesPageInteractions,
                 content: pageContent
             )
         } else {
@@ -347,6 +371,8 @@ struct VideoDetailNativeContentTabView<Content: View>: View {
                 minimumPlayerHeight: 0,
                 bottomInset: bottomInset + bottomToolbarReservedHeight + 16,
                 standardHorizontalInset: standardHorizontalInset,
+                // 第 15 轮：横滑锁定/落位期间禁止简介页竖向滚动（与 live 分支同行为）。
+                suppressesScrolling: suppressesPageInteractions,
                 content: { _ in pageContent() }
             )
         }
@@ -368,6 +394,9 @@ private struct VideoDetailInteractiveScrollingTabPage<Content: View>: View {
     let contentMountsSecondaryContent: Bool
     let bottomInset: CGFloat
     let standardHorizontalInset: CGFloat
+    /// 横滑锁定/落位期间禁止竖向滚动（第 15 轮）。必须是 var：合成 memberwise
+    /// init 会排除带默认值的 let，写 let 会导致调用方编译不过。
+    var suppressesScrolling: Bool = false
     let content: () -> Content
 
     var body: some View {
@@ -387,6 +416,7 @@ private struct VideoDetailInteractiveScrollingTabPage<Content: View>: View {
                 contentMountsSecondaryContent: contentMountsSecondaryContent,
                 bottomInset: bottomInset,
                 standardHorizontalInset: standardHorizontalInset,
+                suppressesScrolling: suppressesScrolling,
                 content: content
             )
         }
@@ -409,6 +439,9 @@ private struct VideoDetailInteractiveScrollHost<Content: View>: UIViewRepresenta
     let contentMountsSecondaryContent: Bool
     let bottomInset: CGFloat
     let standardHorizontalInset: CGFloat
+    /// 横滑锁定/落位期间禁止竖向滚动（第 15 轮）。必须是 var：合成 memberwise
+    /// init 会排除带默认值的 let，写 let 会导致调用方编译不过。
+    var suppressesScrolling: Bool = false
     let content: () -> Content
 
     func makeCoordinator() -> Coordinator {
@@ -422,6 +455,9 @@ private struct VideoDetailInteractiveScrollHost<Content: View>: UIViewRepresenta
         scrollView.showsVerticalScrollIndicator = false
         scrollView.showsHorizontalScrollIndicator = false
         scrollView.contentInsetAdjustmentBehavior = .never
+        // 第 15 轮：横滑锁定期间创建即禁滚（incoming 页在拖动开始时挂载，此时
+        // 标志已为 true）；updateUIView 里随标志变化同步开关。
+        scrollView.isScrollEnabled = !suppressesScrolling
         scrollView.delegate = context.coordinator
         scrollView.configureBottomEdgeEffect(enabled: bottomEdgeBlurEnabled, isActiveContent: isActiveContent)
 
@@ -457,6 +493,11 @@ private struct VideoDetailInteractiveScrollHost<Content: View>: UIViewRepresenta
         // Opacity/accessibilityHidden on the SwiftUI wrapper does not reliably
         // remove a nested UIHostingController's UIKit subtree from VoiceOver.
         scrollView.accessibilityElementsHidden = !isActiveContent
+        // 第 15 轮：横滑锁定/落位期间禁滚。UIKit 里中途置 isScrollEnabled=false
+        // 会立即停掉正在进行的滚动（光关 hit testing 拦不住已在进行的滚动）。
+        // 两页默认都是可滚的（从未在别处关过 isScrollEnabled），恢复 true 不会
+        // 把原本就关掉滚动的页面误打开。
+        scrollView.isScrollEnabled = !suppressesScrolling
         (scrollView as? VideoDetailEdgeEffectScrollView)?.configureBottomEdgeEffect(
             enabled: bottomEdgeBlurEnabled, isActiveContent: isActiveContent
         )
@@ -685,6 +726,9 @@ private struct VideoDetailScrollingTabPage<Content: View>: View {
     let minimumPlayerHeight: CGFloat
     let bottomInset: CGFloat
     let standardHorizontalInset: CGFloat
+    /// 横滑锁定/落位期间禁止竖向滚动（第 15 轮，与 live 分支同行为）。
+    /// 必须是 var：合成 memberwise init 会排除带默认值的 let。
+    var suppressesScrolling: Bool = false
     @ViewBuilder let content: (VideoDetailContentTab) -> Content
     @State private var position = ScrollPosition()
 
@@ -698,6 +742,7 @@ private struct VideoDetailScrollingTabPage<Content: View>: View {
                     alignment: .top
                 )
             }
+            .scrollDisabled(suppressesScrolling)
             .environment(
                 \.videoDetailCommentsEmptyStateMinimumHeight,
                 topInset > 0 ? max(proxy.size.height - bottomInset, 0) : 0
