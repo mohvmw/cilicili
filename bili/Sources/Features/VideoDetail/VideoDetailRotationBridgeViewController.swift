@@ -248,8 +248,14 @@ final class VideoDetailRotationBridgeViewController: UIViewController {
                     return
                 }
             }
+            // 拆播放器（replaceCurrentItem + HLS 桥 teardown）是主线程上的一次性重活。
+            // 它原来在 pop 动画刚结束就执行，正好撞上用户回首页后的第一下滑，
+            // 前几帧被抢主线程就会卡一下。播放早已在 stopPlaybackForNavigation 时暂停、
+            // 音频已静默，mini-player 交接也在上面先行判断过，所以这里等 400ms 再拆，
+            // 用户无感知，第一下滑不再和 teardown 抢主线程。不要把 replaceCurrentItem
+            // 搬到后台线程：AVPlayer 的 item 替换与 KVO 观察者移除有主线程亲和性要求。
             _ = Task { @MainActor [weak self] in
-                await Task.yield()
+                try? await Task.sleep(for: .milliseconds(400))
                 self?.contentController.viewModel.finishPlaybackStopAfterNavigationTransition()
             }
         }

@@ -1,7 +1,12 @@
 import SwiftUI
 
 struct VideoDetailNativeContentTabView<Content: View>: View {
-    private let segmentedPickerHeight: CGFloat = 40
+    /// 滚动内容底部为底部栏（返回/写评论）预留的高度。原名 segmentedPickerHeight，
+    /// 第 10 轮底部切换 pill 移走后改名：数值不变，底部栏仍在，预留空间照旧。
+    private let bottomToolbarReservedHeight: CGFloat = 40
+    /// 顶部 tab 栏高度（固定 44，与原版 tab 行同高）。live 分支下各页内容顶部留白
+    /// 需在播放器高度之外再加这一段，否则 tab 栏会盖住简介页顶部的 UP 行。
+    private let topTabBarHeight: CGFloat = 44
     @Environment(\.appThemeTintColor) private var appTintColor
     @Environment(\.videoDetailHasOuterBottomBar) private var hasOuterBottomBar
     @Binding var selection: VideoDetailContentTab
@@ -15,6 +20,11 @@ struct VideoDetailNativeContentTabView<Content: View>: View {
     var managesBottomToolbar = true
     var placesTopInsetInScrollContent = false
     var interactiveMinimumPlayerHeight = VideoDetailShellLayout.collapsedToolbarHeight
+    /// 播放器实时高度（live 分支由容器经 ShellContentView.State 透传，即 playerFrame.height）。
+    /// 顶部 tab 栏顶部贴着这个高度（播放器底部）。默认 0 表示未同步，
+    /// 此时回退到 topInset（展开高度）。必须是 var：合成 memberwise init
+    /// 会排除带默认值的 let，写 let 会导致调用方编译不过。
+    var currentPlayerHeight: CGFloat = 0
     var contentRevision: Int = 0
     var onOpenCommentComposer: (() -> Void)?
     var onSelectionWillChange: ((VideoDetailContentTab) -> Void)? = nil
@@ -29,10 +39,18 @@ struct VideoDetailNativeContentTabView<Content: View>: View {
     var body: some View {
         Group {
             if placesTopInsetInScrollContent {
-                tabContent
+                // live 分支：内容区全屏，topInset 在每页滚动内容内部做透明留白，
+                // 这里没有 VStack 可放 tab 栏——改用 ZStack 把 tab 栏盖在内容区顶部，
+                // 顶部贴着播放器实时高度（播放器底部），固定不随内容滚动。
+                ZStack(alignment: .top) {
+                    tabContent
+                    topTabBar
+                        .offset(y: tabBarTopOffset)
+                }
             } else {
                 VStack(spacing: 0) {
                     Color.clear.frame(height: topInset).accessibilityHidden(true)
+                    topTabBar
                     tabContent
                 }
             }
@@ -63,7 +81,30 @@ struct VideoDetailNativeContentTabView<Content: View>: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
         .animation(.smooth(duration: 0.28), value: selection)
+        // 左右滑动切换 tab（原版行为）：横向占优的 DragGesture，用 simultaneous
+        // 挂在内容区外层，不抢竖向滚动——竖滑仍由各页自己的滚动视图接管。
+        // 只有横向位移足够大且横向占优时才切 tab；竖向/斜向拖动一律放行。
+        .simultaneousGesture(tabSwipeGesture)
         .background(VideoDetailTheme.background)
+    }
+
+    /// 左右滑动切 tab：左滑进下一页（简介→评论），右滑回上一页（评论→简介）。
+    /// 经 toolbarSelection 切换，onSelectionWillChange 照常触发。
+    /// 注意：手势挂在 tabContent 外层，各页内部的竖向滚动（简介 UIScrollView、
+    /// 评论 UITableView）与横滑手势同时识别，竖滑由位移判断过滤掉，不会误切。
+    private var tabSwipeGesture: some Gesture {
+        DragGesture()
+            .onEnded { value in
+                let translation = value.translation
+                guard abs(translation.width) > 60,
+                      abs(translation.width) > abs(translation.height)
+                else { return }
+                let tabs = VideoDetailContentTab.allCases
+                guard let index = tabs.firstIndex(of: selection) else { return }
+                let targetIndex = translation.width < 0 ? index + 1 : index - 1
+                guard tabs.indices.contains(targetIndex) else { return }
+                toolbarSelection.wrappedValue = tabs[targetIndex]
+            }
     }
 
     private var toolbarSelection: Binding<VideoDetailContentTab> {
@@ -75,6 +116,58 @@ struct VideoDetailNativeContentTabView<Content: View>: View {
                 selection = newSelection
             }
         )
+    }
+
+    /// live 分支下 tab 栏顶部的 y 偏移 = 播放器实时高度（即播放器底部）。
+    /// currentPlayerHeight 为 0（尚未同步）时回退到 topInset（展开高度）。
+    /// 播放器收起时该值随之变小，tab 栏贴着播放器底部上移，不留缝、不消失。
+    private var tabBarTopOffset: CGFloat {
+        currentPlayerHeight > 0 ? currentPlayerHeight : topInset
+    }
+
+    /// 顶部 tab 栏（第 10 轮）：播放器下方、内容上方，固定不随内容滚动。
+    /// 样式对齐原版——“简介 / 评论”文字 tab，当前 tab 有下划线指示，左对齐。
+    /// 点 tab 经 toolbarSelection 切换，与左右滑动切换共用同一绑定，下划线跟随 selection。
+    /// 背景不透明：收起后内容从 tab 栏下方滑过时不透出来。
+    private var topTabBar: some View {
+        HStack(spacing: 24) {
+            ForEach(VideoDetailContentTab.allCases) { tab in
+                Button {
+                    toolbarSelection.wrappedValue = tab
+                } label: {
+                    VStack(spacing: 6) {
+                        Text(topTabBarTitle(tab))
+                            .font(.system(size: 16, weight: selection == tab ? .semibold : .regular))
+                            .foregroundStyle(selection == tab ? appTintColor : .secondary)
+                        Capsule()
+                            .fill(selection == tab ? appTintColor : Color.clear)
+                            .frame(width: 20, height: 3)
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(topTabBarTitle(tab))
+            }
+            Spacer()
+        }
+        .padding(.horizontal, standardHorizontalInset)
+        .frame(height: topTabBarHeight)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(VideoDetailTheme.background)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.primary.opacity(0.08))
+                .frame(height: 0.5)
+        }
+        .animation(.smooth(duration: 0.28), value: selection)
+    }
+
+    /// 顶部 tab 栏的文案：对齐底部切换器（VideoDetailToolbarSegmentedPickerView）
+    /// 与原版——简介 / 评论。枚举自身的 title 是“详情”，此处不用。
+    private func topTabBarTitle(_ tab: VideoDetailContentTab) -> String {
+        switch tab {
+        case .detail: return "简介"
+        case .comments: return "评论"
+        }
     }
 
     @ViewBuilder
@@ -89,8 +182,12 @@ struct VideoDetailNativeContentTabView<Content: View>: View {
                 commentsPage(
                     VideoDetailCommentsPageContext(
                         tab: tab,
-                        topInset: topInset,
-                        bottomInset: bottomInset + segmentedPickerHeight + 16,
+                        // live 分支内容顶部留白 = 播放器高度 + tab 栏高度：
+                        // tab 栏固定盖在播放器下方，内容要从 tab 栏下方开始，
+                        // 否则 tab 栏会盖住评论列表顶部。收起/展开时该留白不变，
+                        // 内容随滚动上移、从 tab 栏下方滑过（tab 栏背景不透明）。
+                        topInset: topInset + topTabBarHeight,
+                        bottomInset: bottomInset + bottomToolbarReservedHeight + 16,
                         minimumPlayerHeight: interactiveMinimumPlayerHeight,
                         standardHorizontalInset: standardHorizontalInset,
                         isActive: selection == tab,
@@ -110,13 +207,15 @@ struct VideoDetailNativeContentTabView<Content: View>: View {
                 onScrollOffsetChange: onScrollOffsetChange,
                 onScrollPhaseChange: onScrollPhaseChange,
                 summary: tab == .detail ? summary : nil,
-                topInset: topInset,
+                // 同上：简介页内容顶部留白 = 播放器高度 + tab 栏高度，
+                // 否则 tab 栏会盖住简介页顶部的 UP 行。
+                topInset: topInset + topTabBarHeight,
                 minimumPlayerHeight: interactiveMinimumPlayerHeight,
                 bottomEdgeBlurEnabled: !hidesBottomToolbar,
                 isActiveContent: selection == tab,
                 contentRevision: contentRevision,
                 contentMountsSecondaryContent: mountsPageContent,
-                bottomInset: bottomInset + segmentedPickerHeight + 16,
+                bottomInset: bottomInset + bottomToolbarReservedHeight + 16,
                 standardHorizontalInset: standardHorizontalInset,
                 content: pageContent
             )
@@ -129,7 +228,7 @@ struct VideoDetailNativeContentTabView<Content: View>: View {
                 summary: tab == .detail ? summary : nil,
                 topInset: 0,
                 minimumPlayerHeight: 0,
-                bottomInset: bottomInset + segmentedPickerHeight + 16,
+                bottomInset: bottomInset + bottomToolbarReservedHeight + 16,
                 standardHorizontalInset: standardHorizontalInset,
                 content: { _ in pageContent() }
             )
@@ -538,6 +637,9 @@ struct VideoDetailBottomToolbarModifier: ViewModifier {
     @Environment(\.navigationHistoryContext) private var navigationHistory
     var isEnabled = true
     let isHidden: Bool
+    /// 保留形参：外层调用方（VideoDetailViewContent）仍传入 selection。
+    /// 底部栏自第 10 轮起不再用它切换 tab（切换 pill 已移到顶部 tab 栏），
+    /// 这里只保留返回与写评论两个入口。
     @Binding var selection: VideoDetailContentTab
     let onOpenCommentComposer: (() -> Void)?
 
@@ -551,30 +653,14 @@ struct VideoDetailBottomToolbarModifier: ViewModifier {
                             VideoDetailHistoryBackMenu(history: navigationHistory)
                         }
                     }
+                    // 底部只保留写评论入口：简介/评论切换 pill 已移到顶部 tab 栏，
+                    // 这里不再放 VideoDetailToolbarSegmentedPickerView。
                     if let onOpenCommentComposer {
-                        ToolbarSpacer(.flexible, placement: .bottomBar)
-                        ToolbarItem(placement: .bottomBar) {
-                            VideoDetailToolbarSegmentedPickerView(
-                                selection: $selection
-                            )
-                                .frame(width: VideoDetailToolbarSegmentedPickerView.toolbarWidth)
-                        }
-                        .sharedBackgroundVisibility(.hidden)
                         ToolbarSpacer(.flexible, placement: .bottomBar)
                         ToolbarItem(placement: .bottomBar) {
                             VideoDetailToolbarCommentAction(onComment: onOpenCommentComposer)
                         }
                         .sharedBackgroundVisibility(.automatic)
-                    } else {
-                        ToolbarItemGroup(placement: .bottomBar) {
-                            Spacer(minLength: 0)
-                            VideoDetailToolbarSegmentedPickerView(
-                                selection: $selection
-                            )
-                                .frame(width: VideoDetailToolbarSegmentedPickerView.toolbarWidth)
-                            Spacer(minLength: 0)
-                        }
-                        .sharedBackgroundVisibility(.hidden)
                     }
                 }
                 .toolbarBackground(.automatic, for: .bottomBar)

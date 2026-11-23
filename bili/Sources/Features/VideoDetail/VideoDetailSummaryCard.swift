@@ -47,6 +47,19 @@ struct VideoDetailSummaryCard: View {
                 store: renderPack.descriptionStore,
                 onFollow: renderPack.actions.follow
             )
+            // 第 10 轮 A：UP 行动画隔离（只影响简介页顶部这一行，不动关注行为和布局）。
+            // .id：以 UP 的 mid 做稳定 identity。UP 不变时行 identity 不变，头像的
+            // CachedRemoteImage（@StateObject loader + retained 显示缓存）不会因父视图
+            // 重算而重建、重载；换 UP（mid 变）或首次拿到 UP 数据时才重置一次，这正是
+            // 该换头像的时刻。不能用 .equatable() 代替：onFollow 是每次 init 新建的闭包，
+            // 无法参与相等比较。
+            // .transaction：把到达本行的任何事务动画清掉。即使上层某处再出现事务级动画，
+            // UP 行（头像 / 名字 / 粉丝数 / 关注 pill）也只会瞬时更新，不做插值、不闪。
+            // 关注 pill 本身没有声明动画，点关注时状态切换本来就是瞬时的，此处无行为变化。
+            .id(descriptionStore.owner?.mid ?? 0)
+            .transaction { transaction in
+                transaction.animation = nil
+            }
 
             if showsVideoInfo {
                 // 对齐原版顺序：UP 行 → 标题 → 数据行 → 操作行。

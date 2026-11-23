@@ -94,6 +94,12 @@ extension VideoDetailCompactSelectionItem {
 }
 
 /// 实验开关开启时的单行入口：区块名 + 当前选中项 + 总数，点按打开选择弹窗。
+/// 第 10 轮合集行再紧凑：标题 headline→subheadline、当前项 subheadline→footnote、
+/// 计数 caption→caption2、行高 54→46、横向内边距 12→10、圆角 12→10、列间距 10→8；
+/// chevron 已是最小的 caption2，不再缩小。
+/// 注意：本按钮由合集（VideoDetailUgcSeasonSection）、分集（VideoDetailPgcEpisodeSection）、
+/// 分P（VideoDetailPageMenu）三处共用，收紧后三者同步变小；展开后的分集列表
+///（VideoDetailCompactSelectionSheet / VideoDetailCompactSelectionRow）不在本轮改动范围。
 struct VideoDetailCompactEntryButton: View {
     let sectionTitle: String
     let countUnit: String
@@ -101,7 +107,7 @@ struct VideoDetailCompactEntryButton: View {
     let accessibilityIdentifier: String
     @Binding var showsSheet: Bool
 
-    private let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
+    private let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
 
     private var currentItem: VideoDetailCompactSelectionItem? {
         items.first { $0.isSelected } ?? items.first
@@ -111,13 +117,13 @@ struct VideoDetailCompactEntryButton: View {
         Button {
             showsSheet = true
         } label: {
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 Text(sectionTitle)
-                    .font(.headline)
+                    .font(.subheadline)
                     .foregroundStyle(.primary)
 
                 Text(currentText)
-                    .font(.subheadline)
+                    .font(.footnote)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.tail)
@@ -125,7 +131,7 @@ struct VideoDetailCompactEntryButton: View {
                 Spacer(minLength: 8)
 
                 Text("\(items.count) \(countUnit)")
-                    .font(.caption)
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
 
                 Image(systemName: "triangle.fill")
@@ -134,8 +140,8 @@ struct VideoDetailCompactEntryButton: View {
                     .foregroundStyle(.secondary)
                     .accessibilityHidden(true)
             }
-            .padding(.horizontal, 12)
-            .frame(maxWidth: .infinity, minHeight: 54, alignment: .leading)
+            .padding(.horizontal, 10)
+            .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
             .background(Color(.secondarySystemGroupedBackground), in: shape)
             .overlay {
                 shape.strokeBorder(Color(.separator).opacity(0.16), lineWidth: 0.8)

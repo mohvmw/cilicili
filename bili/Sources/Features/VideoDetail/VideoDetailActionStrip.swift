@@ -2,14 +2,15 @@ import SwiftUI
 
 struct VideoDetailActionStrip: View, Equatable {
     enum Metrics {
-        // 第 9 轮简介页紧凑化：行高 44→40、按钮圆 32→28、图标 17→15。
-        // avatarImageSide 44→40：真实操作行已无头像列，该值现仅供加载骨架占位
-        //（InitialVideoDetailControls）使用，随行高一并收紧；avatarPixelSize 不变，
+        // 第 10 轮简介页再紧凑：行高 40→36、按钮圆 28→24、图标 15→13；
+        // 图标与圆环的留白比例与第 9 轮一致（图标比圆小 11pt），不会溢出圆。
+        // avatarImageSide 仅供单元测试引用（见 VideoDetailActionStripLayout 的注释），
+        // 真实操作行与加载骨架均已无头像列；avatarPixelSize 不变，
         // UP 行 32pt 头像仍用它（3x 屏只需 96px）。
-        static let rowHeight: CGFloat = 40
-        static let actionLabelSide: CGFloat = 28
+        static let rowHeight: CGFloat = 36
+        static let actionLabelSide: CGFloat = 24
         static let avatarImageSide: CGFloat = 40
-        static let iconSize: CGFloat = 15
+        static let iconSize: CGFloat = 13
         static let avatarPixelSize = 112
     }
 

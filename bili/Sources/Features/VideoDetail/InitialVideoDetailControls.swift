@@ -18,11 +18,10 @@ private struct InitialVideoDetailActionStrip: View {
     let contentWidth: CGFloat
 
     var body: some View {
+        // 第 10 轮去掉头像占位圆：真实操作行第 9 轮已去头像列，只剩 4 个按钮，
+        // 骨架再渲染头像圆会在视频打开瞬间闪一下、随后消失；现只留 4 个图标占位，
+        // 与真实行一一对齐。图标占位圆随 Metrics 收小（28→24）。
         HStack(spacing: layout.actionSpacing) {
-            avatarPlaceholder
-                .frame(width: layout.avatarColumnWidth, height: layout.rowHeight)
-                .padding(.trailing, layout.avatarActionSpacing - layout.actionSpacing)
-
             ForEach(0..<4, id: \.self) { _ in
                 iconPlaceholder
                     .frame(width: layout.columnWidth, height: layout.rowHeight)
@@ -34,15 +33,6 @@ private struct InitialVideoDetailActionStrip: View {
             alignment: .leading
         )
         .accessibilityHidden(true)
-    }
-
-    private var avatarPlaceholder: some View {
-        Circle()
-            .fill(VideoDetailTheme.secondarySurface.opacity(VideoDetailSkeletonStyle.actionStripFillOpacity))
-            .frame(
-                width: layout.avatarImageSide,
-                height: layout.avatarImageSide
-            )
     }
 
     private var iconPlaceholder: some View {

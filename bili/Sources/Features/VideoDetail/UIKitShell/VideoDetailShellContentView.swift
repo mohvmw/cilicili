@@ -14,6 +14,10 @@ struct VideoDetailShellContentView: View {
         /// 内容顶部留白 = 播放器最大（expanded）高度。仅在旋转/比例变化时更新，
         /// 滚动时不变（滚动只改播放器实际高度，不动内容区）。
         @Published var topInset: CGFloat = 0
+        /// 播放器实时高度（= playerFrame.height，由容器 model 的 synchronize 同步）。
+        /// 顶部 tab 栏顶部贴着这个高度（播放器底部）。初始 0 表示尚未同步，
+        /// tab view 收到 0 时回退到 topInset（展开高度）。
+        @Published var playerHeight: CGFloat = 0
         @Published var bottomInset: CGFloat = 0
         @Published var scrollAdjustment: VideoDetailScrollAdjustment?
         @Published var suppressesInteractiveContentActions = false
@@ -113,6 +117,8 @@ private struct VideoDetailShellContentBody: View {
             managesBottomToolbar: false,
             placesTopInsetInScrollContent: placesTopInsetInScrollContent,
             interactiveMinimumPlayerHeight: interactiveMinimumPlayerHeight,
+            // 第 10 轮：把播放器实时高度透传给 tab view，顶部 tab 栏顶部贴着它。
+            currentPlayerHeight: state.playerHeight,
             contentRevision: contentRevision,
             onOpenCommentComposer: { onOpenCommentComposer(nil) },
             onSelectionWillChange: onSelectionWillChange,

@@ -246,6 +246,14 @@ final class VideoDetailSwiftUIContainerModel: ObservableObject {
         if contentState.hidesBottomToolbar != layout.usesFullscreenLayout {
             contentState.hidesBottomToolbar = layout.usesFullscreenLayout
         }
+        // 第 10 轮：把播放器实时高度同步到 contentState，供顶部 tab 栏定位
+        // （tab 栏顶部贴着播放器底部）。与 topInset 同样的 0.5pt 去重阈值；
+        // 滚动收起时经 scheduleLayoutSynchronization 异步同步，tab 栏跟随上移。
+        // 放在 contentTopInset 的 guard 之前：全屏时 contentTopInset 为 nil，
+        // 但 playerFrame 高度仍要保持新鲜（退出全屏即恢复）。
+        if abs(contentState.playerHeight - layout.playerFrame.height) > 0.5 {
+            contentState.playerHeight = layout.playerFrame.height
+        }
         guard let contentTopInset = layout.contentTopInset else { return }
         guard abs(contentState.topInset - contentTopInset) > 0.5 else { return }
         contentState.topInset = contentTopInset

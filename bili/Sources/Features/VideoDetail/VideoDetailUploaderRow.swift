@@ -2,6 +2,10 @@ import SwiftUI
 
 /// 简介页顶部的 UP 行（对齐原版顺序：UP 行 → 标题 → 数据行 → 操作行）。
 /// 头像 + UP 名点开进个人空间；关注 pill 复用操作行的关注行为。
+/// 第 10 轮 A：本行内部不挂任何 .animation 修饰符；防闪的隔离（稳定 identity +
+/// 事务动画清零）放在 VideoDetailSummaryCard 的调用处。头像本身也不会因重渲染而闪：
+/// PlaybackDetailOwnerAvatarImage → CachedRemoteImage 用 @StateObject 持有 loader、
+/// retained 显示缓存、animatesAppearance = false，只要行 identity 稳定就不会重载占位图。
 struct VideoDetailUploaderRow: View {
     @Environment(\.appThemeTintColor) private var appTintColor
 
