@@ -4,6 +4,14 @@ import UIKit
 struct VideoDetailMoreMenu: View {
     @EnvironmentObject private var sessionStore: SessionStore
     @EnvironmentObject private var libraryStore: LibraryStore
+    /// 第 19 轮：拖动期间禁止点按的共享状态（简介页内容在 UIHostingController 里，
+    /// 第 17 轮已在 scrollContent 显式注入环境；其他地方为 nil = 不抑制）。
+    /// 注意：Menu 本身的打开无法用 action 守卫拦（它没有触发回调，且 .disabled
+    /// 是渲染时取值、UIHostingController 的 rootView 不会随抑制状态重渲染，
+    /// 所以 .disabled 在拖动期间不会及时更新）。这里守的是菜单项的 action——
+    /// 滑动中菜单万一弹出来，0.35s 内点菜单项也不会真的执行；ShareLink 是系统
+    /// 控件、没有 action 回调，无法守（菜单项守卫已覆盖主要的有害操作）。
+    @Environment(\.videoDetailTapSuppression) private var tapSuppression
     let api: BiliAPIClient
     let aid: Int?
     let shareURL: URL?
@@ -60,6 +68,8 @@ struct VideoDetailMoreMenu: View {
     private var linkActions: some View {
         Group {
             Button {
+                // 第 19 轮：拖动期间禁止点按（菜单项的 action 在触发时拦）。
+                guard tapSuppression?.isSuppressed != true else { return }
                 guard let shareURL else { return }
                 UIPasteboard.general.string = shareURL.absoluteString
                 completedMessage = "已复制链接"
@@ -93,6 +103,8 @@ struct VideoDetailMoreMenu: View {
     }
 
     private func performWatchLaterAction() {
+        // 第 19 轮：拖动期间禁止点按（菜单项的 action 在触发时拦）。
+        guard tapSuppression?.isSuppressed != true else { return }
         guard let aid, !isBusy, !isLoading else { return }
         guard loadedIdentity == identity, let context, let isAdded else {
             Task { await load(reportError: true) }

@@ -181,19 +181,27 @@ struct VideoDetailNativeContentTabView<Content: View>: View {
                 // onChanged 都触发重渲染。
                 if !tapSuppression.isSuppressed { tapSuppression.isSuppressed = true }
                 let translation = value.translation
-                // 方向锁定（第 17 轮改）：未判定时看总位移——量级门仍是 8pt，
-                // 但横滑判定放宽：横向分量达到竖向分量的 0.7 倍即判横滑
+                // 方向锁定（第 17 轮改、第 19 轮把量级门 8→20）：
+                // 未判定时看总位移——量级门是 20pt。起手前 ~10–15pt 的轨迹
+                // 主要是落指噪声（按下时的一点下钩、手指初动的抖动），在 8pt
+                // 处判方向经常锁错：横滑起手带下钩被锁成竖滑 → 不切 tab；
+                // 竖滑起手带横漂被锁成横滑 → isScrollEnabled=false 把滚动
+                // 杀掉、页面只横向跟手再弹回；且锁定后不再改判，错一次整
+                // 次手势都废。20pt 时有意方向已占主导，误锁率大幅下降。
+                // 横滑判定：横向分量达到竖向分量的 0.7 倍即判横滑
                 // （约 55° 以内都算横滑，斜滑也能切 tab）。竖滑用互补条件，
                 // 两者恰好互斥、无死区：|dx| > 0.7|dy| 与 |dy| > |dx|/0.7
                 // 必居其一。注意不能只放宽横滑条件而保留旧竖滑条件
-                // （|dy| > |dx|）：45°~55° 的斜滑会先撞上竖滑门（|dy| 先到 8pt）
-                // 被判成竖滑，放宽就白做了。正常竖向滚动带少量横向漂移
+                // （|dy| > |dx|）：45°~55° 的斜滑会先撞上竖滑门（|dy| 先到
+                // 量级门）被判成竖滑，放宽就白做了。正常竖向滚动带少量横向漂移
                 // （通常 <30°）不会误切；漂到 55° 以内按用户要求算横滑。
                 // 一旦锁定不再改判，避免竖向滚动中途横向抖动，也避免横滑
-                // 中途被竖向分量抢走。
+                // 中途被竖向分量抢走。代价：锁定前页面不跟手，锁定时 dragOffset
+                // 一次跳到当前位移（约 20pt，小半个指节），可接受；切 tab 阈值
+                // 仍是 |dx|>60（约 15% 屏宽，防误切），本次不改。
                 if let isHorizontal = isHorizontalDrag {
                     guard isHorizontal else { return }
-                } else if max(abs(translation.width), abs(translation.height)) > 8 {
+                } else if max(abs(translation.width), abs(translation.height)) > 20 {
                     if abs(translation.width) > abs(translation.height) * 0.7 {
                         isHorizontalDrag = true
                         dragSession += 1

@@ -102,6 +102,9 @@ extension VideoDetailCompactSelectionItem {
 /// 分P（VideoDetailPageMenu）三处共用，收紧后三者同步变小；展开后的分集列表
 ///（VideoDetailCompactSelectionSheet / VideoDetailCompactSelectionRow）不在本轮改动范围。
 struct VideoDetailCompactEntryButton: View {
+    /// 第 19 轮：拖动期间禁止点按的共享状态（简介页内容在 UIHostingController 里，
+    /// 第 17 轮已在 scrollContent 显式注入环境；其他地方为 nil = 不抑制）。
+    @Environment(\.videoDetailTapSuppression) private var tapSuppression
     let sectionTitle: String
     let countUnit: String
     let items: [VideoDetailCompactSelectionItem]
@@ -115,9 +118,7 @@ struct VideoDetailCompactEntryButton: View {
     }
 
     var body: some View {
-        Button {
-            showsSheet = true
-        } label: {
+        Button(action: guardedOpenSheet) {
             HStack(spacing: 8) {
                 Text(sectionTitle)
                     .font(.subheadline)
@@ -167,6 +168,17 @@ struct VideoDetailCompactEntryButton: View {
         guard let current = currentItem else { return sectionTitle }
         let numberPart = current.numberLabel.map { "\($0) " } ?? ""
         return "\(sectionTitle)，当前 \(numberPart)\(current.displayTitle)，共 \(items.count) \(countUnit)"
+    }
+
+    /// 第 19 轮：拖动期间禁止点按。Button 在松手、手指仍在其 bounds 内时触发；
+    /// 跟手滑动时合集卡跟着手指走，松手时仍在 Button 内，allowsHitTesting
+    /// 拦不住 in-flight 按压，所以在触发时拦。环境默认 nil = 不抑制。
+    /// 本按钮由合集（VideoDetailUgcSeasonSection）、分集（VideoDetailPgcEpisodeSection）、
+    /// 分P（VideoDetailPageMenu）三处共用，都在简介页滚动内容里（第 17 轮已在
+    /// scrollContent 显式注入环境），一次改动三处都守住；正常点按照常开弹窗。
+    private func guardedOpenSheet() {
+        guard tapSuppression?.isSuppressed != true else { return }
+        showsSheet = true
     }
 }
 

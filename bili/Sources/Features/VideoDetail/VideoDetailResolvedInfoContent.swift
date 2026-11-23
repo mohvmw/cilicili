@@ -3,6 +3,9 @@ import SwiftUI
 struct VideoDetailResolvedInfoContent: View {
     @ObservedObject var store: VideoDetailDescriptionRenderStore
     @Binding var isExpanded: Bool
+    /// 第 19 轮：拖动期间禁止点按的共享状态（简介页内容在 UIHostingController 里，
+    /// 第 17 轮已在 scrollContent 显式注入环境；其他地方为 nil = 不抑制）。
+    @Environment(\.videoDetailTapSuppression) private var tapSuppression
 
     private var presentation: VideoDetailInfoPresentation {
         VideoDetailInfoPresentation(store: store)
@@ -74,6 +77,11 @@ struct VideoDetailResolvedInfoContent: View {
     }
 
     private func toggleExpansion() {
+        // 第 19 轮：拖动刚结束时松手触发的点按直接跳过。chevron 是 Button，
+        // 松手、手指仍在其 bounds 内时触发；跟手滑动时标题行跟着手指走，
+        // 松手时仍在 Button 内，allowsHitTesting 拦不住 in-flight 按压。
+        // 在这里守，一次覆盖 chevron Button 与标题 onTapGesture 两处调用。
+        guard tapSuppression?.isSuppressed != true else { return }
         // 第 10 轮 A：去掉 withAnimation。withAnimation 会把 .snappy 弹簧写进整条事务，
         // 于是同一次提交里其它所有变化也跟着做动画——简介块下方整块内容（操作行 /
         // 合集 / 相关推荐）上滑约 130px，以及恰好赶在同一 runloop 提交的其它刷新

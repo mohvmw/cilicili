@@ -51,12 +51,16 @@ struct VideoOwnerRouteLink<Label: View>: View {
     let owner: VideoOwner
     @ViewBuilder let label: () -> Label
     @Environment(\.openVideoOwnerRouteAction) private var openVideoOwnerRoute
+    /// 第 19 轮：拖动期间禁止点按的共享状态。详情页里 openVideoOwnerRoute 由
+    /// RootTabView 提供，走 Button 路径；简介页 scrollContent 与评论页 cell
+    /// 里都已注入环境（第 17 轮），能读到。详情页外环境为 nil = 不抑制，
+    /// 其他页面的 UP 头像/名字行为不变。NavigationLink 备用路径（action 为 nil
+    /// 时）无法在触发时拦，但只在详情页外出现，那里本就不抑制。
+    @Environment(\.videoDetailTapSuppression) private var tapSuppression
 
     var body: some View {
         if let openVideoOwnerRoute {
-            Button {
-                openVideoOwnerRoute(owner)
-            } label: {
+            Button(action: guardedOpenOwner) {
                 label()
             }
             .buttonStyle(.plain)
@@ -66,6 +70,14 @@ struct VideoOwnerRouteLink<Label: View>: View {
             }
             .buttonStyle(.plain)
         }
+    }
+
+    /// 第 19 轮：拖动期间禁止点按。Button 在松手、手指仍在其 bounds 内时触发；
+    /// 跟手滑动时 UP 行跟着手指走，松手时仍在 Button 内，allowsHitTesting
+    /// 拦不住 in-flight 按压，所以在触发时拦。环境默认 nil = 不抑制。
+    private func guardedOpenOwner() {
+        guard tapSuppression?.isSuppressed != true else { return }
+        openVideoOwnerRoute?(owner)
     }
 }
 
