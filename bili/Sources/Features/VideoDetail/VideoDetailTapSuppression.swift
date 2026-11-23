@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 
 /// 第 17 轮：拖动期间禁止点按的共享状态（引用类型）。
