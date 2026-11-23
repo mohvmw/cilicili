@@ -12,6 +12,12 @@ extension HomeFeedMediaPreloadCoordinator {
     func scheduleImagePrefetch(for videos: [VideoItem]) {
         imagePrefetchTask?.cancel()
         resetImageLookaheadIfNeeded(for: videos)
+        // 第 16 轮：内存警告后 30 秒内不调度封面预取（HomeFeedPreloadMemoryWarningPause），
+        // 避免刚清完缓存又立刻下满。已取消的旧任务不再重建；暂停期过了下次调度自动恢复。
+        guard !HomeFeedPreloadMemoryWarningPause.shared.isPaused else {
+            imagePrefetchTask = nil
+            return
+        }
         let environment = PlaybackEnvironment.current
         let layout = libraryStore.homeFeedLayout
         let prefetchLimit = HomeFeedImagePrefetchPolicy.initialPrefetchLimit(
@@ -41,6 +47,10 @@ extension HomeFeedMediaPreloadCoordinator {
     func scheduleImageLookahead(for videos: [VideoItem], visibleIndex: Int) {
         guard videos.indices.contains(visibleIndex) else { return }
         resetImageLookaheadIfNeeded(for: videos)
+        // 第 16 轮：内存警告后 30 秒内不调度封面 lookahead（HomeFeedPreloadMemoryWarningPause）。
+        // 已在跑的任务不受影响（其下载由抑制门的内存警告作用域拦住，暂停期过后继续）；
+        // 暂停期过了下次调度自动恢复。
+        guard !HomeFeedPreloadMemoryWarningPause.shared.isPaused else { return }
 
         let environment = PlaybackEnvironment.current
         let layout = libraryStore.homeFeedLayout

@@ -3,6 +3,12 @@ import Foundation
 extension HomeFeedMediaPreloadCoordinator {
     func schedulePlaybackPreload(for videos: [VideoItem], initialDelay: TimeInterval) {
         playbackPreloadTask?.cancel()
+        // 第 16 轮：内存警告后 30 秒内不调度播放预载（HomeFeedPreloadMemoryWarningPause），
+        // 避免刚清完缓存又立刻下满。暂停期过了下次调度自动恢复。
+        guard !HomeFeedPreloadMemoryWarningPause.shared.isPaused else {
+            playbackPreloadTask = nil
+            return
+        }
         let playbackAdaptationProfile = PlayerPerformanceStore.shared.playbackAdaptationProfile(
             isEnabled: libraryStore.isPlaybackAutoOptimizationEnabled
         )

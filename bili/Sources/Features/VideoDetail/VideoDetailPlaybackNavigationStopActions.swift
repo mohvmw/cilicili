@@ -91,11 +91,49 @@ extension VideoDetailViewModel {
         // popping back does not trigger a full detail/playback reload.
         if isAwaitingRelatedVideoReturnPlayback {
             stablePlayerViewModel?.pauseForNavigation()
+            // 第 16 轮：挂起页登记进保留深度表；超过最近 2 个时，最旧的挂起页
+            // 延迟 400ms 后释放播放器（与 pop 的 teardown 同款延迟，避免在 push
+            // 动画里做 replaceCurrentItem + HLS 桥 teardown 的主线程重活）。
+            // 返回最近一个视频仍即时恢复；更深的旧页返回时重载。
+            SuspendedDetailPlaybackRegistry.shared.register(self)
+            for page in SuspendedDetailPlaybackRegistry.shared.takePagesBeyondRetainedDepth() {
+                scheduleReleaseSuspendedPlaybackForMemory(page)
+            }
             return
         }
 
         stablePlayerViewModel?.pauseForNavigation()
         navigationState.isPlaybackStopPending = true
+    }
+
+    /// 第 16 轮：给一个已被逐出保留深度的挂起页排期释放播放器（延迟 400ms）。
+    /// 与 pop 的 teardown 同款延迟：replaceCurrentItem + HLS 桥 teardown 是
+    /// 主线程上的一次性重活，不要在 push 动画里做。400ms 后才真正释放，
+    /// 内存晚 400ms 回落，不影响总量上限。
+    private func scheduleReleaseSuspendedPlaybackForMemory(_ page: VideoDetailViewModel) {
+        Task { @MainActor [weak page] in
+            try? await Task.sleep(for: .milliseconds(400))
+            guard let page else { return }
+            page.releaseSuspendedPlaybackForMemoryIfNeeded()
+        }
+    }
+
+    /// 第 16 轮：释放本页被挂起的播放器（仅当本页仍在等相关视频返回时）。
+    /// 复用 finishPlaybackStopAfterNavigationTransition 同款拆播放器路径
+    ///（stopStablePlaybackForNavigation：player stop + 置空），只保留轻量模型
+    ///（详情/评论/相关数据都在 VideoDetailViewModel 上），返回时经 load()
+    /// → restoreStablePlayerForLoadedDetail() 重建播放器、按
+    /// pendingNavigationResumeTime 续播。
+    /// 守卫：若用户已在 400ms 内返回本页（已恢复）、或已交接给 mini-player，
+    /// 跳过释放——前者媒体还在、即时恢复，后者播放器已不在本页手里。
+    func releaseSuspendedPlaybackForMemoryIfNeeded() {
+        guard isPlaybackInvalidatedForNavigation,
+              isAwaitingRelatedVideoReturnPlayback,
+              !didTransferToSystemMiniPlayer,
+              stablePlayerViewModel != nil
+        else { return }
+        stopStablePlaybackForNavigation()
+        SuspendedDetailPlaybackRegistry.shared.unregister(self)
     }
 
     private func capturePlaybackStateForNavigation(resumeTime: TimeInterval) {

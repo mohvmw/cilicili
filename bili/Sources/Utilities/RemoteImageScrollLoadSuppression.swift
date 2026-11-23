@@ -38,6 +38,13 @@ actor RemoteImageLoadSuppressionGate {
     private var waiters: [UUID: CheckedContinuation<Void, Never>] = [:]
     private var visibleBypassCount = 0
     private var deferredPrefetchCount = 0
+    /// 第 16 轮：内存警告预取暂停的作用域。内存警告后 30 秒内不预取图片，
+    /// 避免刚清完缓存又立刻下满；可见图片的加载不受影响（waitUntilAllowed
+    /// 里 .visible 优先级直接放行）。作用域由下面的 suspend 方法挂上、
+    /// 30 秒后自动摘掉；重复警告会重新计时。
+    private var memoryWarningScopeID: UUID?
+    private var memoryWarningGeneration = 0
+    private var memoryWarningResumeTask: Task<Void, Never>?
 
     func setSuppressed(_ isSuppressed: Bool, for scopeID: UUID) {
         if isSuppressed {
@@ -46,6 +53,33 @@ actor RemoteImageLoadSuppressionGate {
             activeScopes.remove(scopeID)
             resumeWaitersIfAllowed()
         }
+    }
+
+    /// 第 16 轮：内存警告后暂停图片预取一段时间（默认 30 秒）。
+    /// 由 AppDelegate 的 applicationDidReceiveMemoryWarning 调用。
+    /// 预取任务在 waitUntilAllowed 里等作用域摘掉再继续；可见加载不受影响。
+    /// 重复警告会重新计时（代际校验：旧的恢复任务醒来时发现代际已变就跳过，
+    /// 不会误删新一轮的暂停作用域）。
+    func suspendPrefetchForMemoryWarning(duration: TimeInterval = 30) {
+        let scopeID = memoryWarningScopeID ?? UUID()
+        memoryWarningScopeID = scopeID
+        activeScopes.insert(scopeID)
+        memoryWarningGeneration += 1
+        let generation = memoryWarningGeneration
+        memoryWarningResumeTask?.cancel()
+        memoryWarningResumeTask = Task.detached {
+            try? await Task.sleep(for: .seconds(duration))
+            guard !Task.isCancelled else { return }
+            await self.clearMemoryWarningScope(scopeID, generation: generation)
+        }
+    }
+
+    private func clearMemoryWarningScope(_ scopeID: UUID, generation: Int) {
+        guard memoryWarningScopeID == scopeID, memoryWarningGeneration == generation else { return }
+        memoryWarningScopeID = nil
+        memoryWarningResumeTask = nil
+        activeScopes.remove(scopeID)
+        resumeWaitersIfAllowed()
     }
 
     func waitUntilAllowed(

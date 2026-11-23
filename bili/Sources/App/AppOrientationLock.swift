@@ -127,10 +127,22 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     func applicationDidReceiveMemoryWarning(_ application: UIApplication) {
         RemoteImageDisplayMemoryCache.shared.clear()
         BiliEmoteMemoryCache.clear()
+        // 第 16 轮：警告后暂停首页预取 30 秒（封面预取 + 播放预载），
+        // 见 HomeFeedPreloadMemoryWarningPause；暂停期过了自动恢复。
+        HomeFeedPreloadMemoryWarningPause.shared.pause()
         Task {
-            await RemoteImageCache.shared.clearMemoryCache(cancelInFlight: true)
+            // 第 16 轮：分级清理——只清已解码的图片缓存，不取消在途下载。
+            // 原来 cancelInFlight: true 会连正在下载的封面一起取消，清完又要
+            // 重下（RemoteImageCache.finish 只在在途条目还在时才把图写入缓存，
+            // 取消后可见 cell 的封面必然重下，加重“清完又下满”的正反馈）。
+            // 解码缓存（内存大头）照常清；在途下载留着，完成即入缓存。
+            await RemoteImageCache.shared.clearMemoryCache(cancelInFlight: false)
             await PlayURLCache.shared.clearMemoryCache()
             await DanmakuResourceCache.shared.clear()
+            // 第 16 轮：警告后暂停图片预取 30 秒（RemoteImageLoadSuppressionGate
+            // 的内存警告作用域），避免刚清完又被首页预取立刻下满。
+            // 只拦预取（waitUntilAllowed 的 .prefetch 分支），可见图片的加载不受影响。
+            await RemoteImageLoadSuppressionGate.shared.suspendPrefetchForMemoryWarning()
         }
     }
 }

@@ -35,6 +35,10 @@ final class MetalDanmakuView: UIView, DanmakuOverlayRendering, MTKViewDelegate {
     private var canvasViewport = CGRect.zero
     private var suspended = false
     private var stopped = false
+    /// 第 16 轮：内存警告后待重建。memoryWarning() 只清掉时间线/布局/渲染器并立 flag，
+    /// 不当场重建（内存压力还没过去就重建会把刚清的效果抵消一半）；下一个有效的
+    /// 时钟/配置事件（synchronizePlaybackTime / apply）再重建，见 refillAfterMemoryWarningIfNeeded。
+    private var needsMemoryWarningRefill = false
     private var manualRefreshPending = false
     private var manualRefreshRetryTask: Task<Void, Never>?
     private var manualRefreshGeneration = 0
@@ -221,6 +225,7 @@ final class MetalDanmakuView: UIView, DanmakuOverlayRendering, MTKViewDelegate {
             timeline.clear(); lastRevision = -1
             if before > 0 { traceScene("visibility-clear enabled=\(next.isEnabled) presented=\(next.hasPresentedPlayback) items=\(next.items.count)", before: before) }
         } else if previous?.isEnabled == false || previous?.hasPresentedPlayback == false { rebuild(reason: "visibility-restored") }
+        refillAfterMemoryWarningIfNeeded()
         updateInstances()
         updateDrawLoop()
         drawOnceIfVisible()
@@ -238,6 +243,7 @@ final class MetalDanmakuView: UIView, DanmakuOverlayRendering, MTKViewDelegate {
         let rateChanged = abs(currentRate - lastSynchronizedPlaybackRate) > 0.001
         lastSynchronizedPlaybackRate = currentRate
         if force || (!rateChanged && (raw + 0.2 < previous || abs(raw - previous) > 1.25)) { rebuild(reason: force ? "forced-clock-sync" : "clock-sync-jump") }
+        refillAfterMemoryWarningIfNeeded()
         updateInstances()
         if configuration?.isPlaying != true { drawOnceIfVisible() }
     }
@@ -553,6 +559,20 @@ final class MetalDanmakuView: UIView, DanmakuOverlayRendering, MTKViewDelegate {
         renderer.reset()
         lastRevision = -1
         // Refill lazily on the next valid clock/render event.
-        if shouldRender { rebuild(reason: "memory-warning-refill"); drawOnceIfVisible() }
+        // 第 16 轮：只立 flag，不当场重建。原来这里 `if shouldRender { rebuild(...); drawOnceIfVisible() }`
+        // 在内存压力还没过去时就把弹幕重建回来，清缓存的效果被当场抵消一半。
+        // 真正的重建等下一个有效的时钟/配置事件（见 refillAfterMemoryWarningIfNeeded），
+        // 与上面注释写的懒重建一致。若播放已停（shouldRender 为 false），flag 留着，
+        // 恢复渲染时由 apply 的 visibility-restored 分支或本 flag 触发重建，不会永久消失。
+        needsMemoryWarningRefill = true
+    }
+
+    /// 第 16 轮：内存警告后的懒重建。memoryWarning() 只清状态、立 flag，
+    /// 真正的重建等到下一个有效的时钟/配置事件（synchronizePlaybackTime /
+    /// apply）再做。只在 shouldRender 时才消耗 flag，否则 flag 留着等渲染恢复。
+    private func refillAfterMemoryWarningIfNeeded() {
+        guard needsMemoryWarningRefill, shouldRender else { return }
+        needsMemoryWarningRefill = false
+        rebuild(reason: "memory-warning-refill")
     }
 }

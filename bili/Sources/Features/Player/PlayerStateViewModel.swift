@@ -3148,7 +3148,13 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
         playbackPhase = .paused
         invalidatePictureInPicturePlaybackState()
         syncRemotePlaybackControls()
-        rescheduleTimeObserverIfNeeded()
+        // 第 16 轮：挂起页真正停掉刷新定时器。原来这里调 rescheduleTimeObserverIfNeeded()，
+        // 只是把定时器重排成暂停态的 2.4s 间隔——被保留的挂起页每 2.4 秒仍跑一次
+        // refreshPlaybackState（engine.snapshot + 网速采样 + 诊断同步），N 个保留页
+        // 就是 N 个定时器。恢复时由 restoreAudioAfterCancelledNavigation() 重建
+        // （另有 handleEnginePlaybackState 的状态变化重建做兜底）。
+        timeObserver?.invalidate()
+        timeObserver = nil
     }
 
     func pendingNavigationResumeState() -> (resumeTime: TimeInterval, shouldResumePlayback: Bool)? {
@@ -3205,6 +3211,11 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
                 resumePreparedPlaybackAfterSeek()
             }
         }
+        // 第 16 轮：恢复时重建刷新定时器（pauseForNavigation 里已真正停掉）。
+        // 即使本次不自动恢复播放（等用户点播），定时器也要先恢复，否则进度条 /
+        // 网速在用户点播前一直不刷新。handleEnginePlaybackState 的状态变化
+        // 重建是另一道兜底。
+        rescheduleTimeObserverIfNeeded(force: true)
         return true
     }
 
