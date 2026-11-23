@@ -1,5 +1,12 @@
 import SwiftUI
 
+/// 第 20 轮：滚动视图原生 pan 的回调。translation = 手指累计位移（等价于
+/// 旧 DragGesture 的 value.translation），startLocation = 落点（等价于
+/// value.startLocation），state = pan 状态（.changed 走跟手逻辑，
+/// .ended/.cancelled 走松手逻辑）。由两页滚动宿主经 onTabSwipePan 透传，
+/// 在 Coordinator 里观察滚动视图自己的 panGestureRecognizer。
+typealias VideoDetailTabSwipePanHandler = (CGSize, CGPoint, UIPanGestureRecognizer.State) -> Void
+
 struct VideoDetailNativeContentTabView<Content: View>: View {
     /// 滚动内容底部为底部栏（返回/写评论）预留的高度。原名 segmentedPickerHeight，
     /// 第 10 轮底部切换 pill 移走后改名：数值不变，底部栏仍在，预留空间照旧。
@@ -117,11 +124,12 @@ struct VideoDetailNativeContentTabView<Content: View>: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
         .animation(.smooth(duration: 0.28), value: selection)
-        // 左右滑动切换 tab（原版卡片效果，第 14 轮）：横向分量达到竖向 0.7 倍
-        // 即判横滑的 DragGesture（第 17 轮放宽，斜滑也能切），
-        // 用 simultaneous 挂在内容区外层，不抢竖向滚动——竖滑仍由各页自己的
-        // 滚动视图接管。跟手时两页实时跟随手指；松手超过阈值完成切换、不足弹回。
-        .simultaneousGesture(tabSwipeGesture)
+        // 第 20 轮：tab 切换手势不再是挂在内容区外层的 SwiftUI DragGesture。
+        // 旧做法让 DragGesture 参与每一次触摸的识别，滚动视图的 pan 要等它
+        // 失败（或满 minimumDistance 10pt）才开始，手指头 10–20pt 内内容不动，
+        // 就是“不跟手”的粘滞感。改由两页滚动宿主观察滚动视图自己的
+        // panGestureRecognizer（见 onTabSwipePan）：pan 是唯一的识别者，
+        // 竖滑与首页一样跟手；横滑跟手逻辑不变（见 tabSwipePanHandler）。
         .background(VideoDetailTheme.background)
     }
 
@@ -168,103 +176,168 @@ struct VideoDetailNativeContentTabView<Content: View>: View {
     /// 左边缘开始的右滑留给系统返回（桥接层已把内容 pop 手势限定为边缘开始），
     /// 否则边缘右滑会一边返回一边切 tab。tabContent 占满宽度，
     /// startLocation.x 就是离左边缘的距离。
-    private var tabSwipeGesture: some Gesture {
+    /// 第 20 轮：tab 切换手势的 pan 回调，由两页滚动宿主经 onTabSwipePan 透传。
+    /// 触发源从 SwiftUI DragGesture 换成滚动视图自己的 panGestureRecognizer
+    /// （见 VideoDetailInteractiveScrollHost / VideoDetailCommentsTableViewHost
+    /// 的 Coordinator）：pan 是滚动视图唯一的识别者，不再有祖先层 DragGesture
+    /// 参与每一次触摸的识别，竖滑与首页一样跟手。跟手/锁定/松手逻辑与旧
+    /// DragGesture 完全相同，只是 value.translation → translation、
+    /// value.startLocation → startLocation、onChanged/onEnded → pan 的
+    /// .changed/.ended 状态。点按抑制（第 17 轮）仍在第一下 pan 置上，
+    /// 纯点按不产生 pan 回调，不误伤正常点击。
+    private var tabSwipePanHandler: VideoDetailTabSwipePanHandler {
+        { [self] translation, startLocation, state in
+            switch state {
+            case .began, .changed:
+                handleTabSwipePanChanged(translation: translation, startLocation: startLocation)
+            case .ended, .cancelled, .failed:
+                handleTabSwipePanEnded(translation: translation, startLocation: startLocation)
+            case .possible:
+                break
+            @unknown default:
+                break
+            }
+        }
+    }
+
+    /// 第 20 轮：仅供非 live 分支（纯 SwiftUI ScrollView，初始播放阶段与
+    /// UITest 夹具用）的 DragGesture。那里没有 UIKit 滚动视图可观察，保留旧的
+    /// DragGesture 以免失去滑动切 tab；调的是同一套 handleTabSwipePanChanged/
+    /// Ended（translation/startLocation 直接对应），行为与 live 分支一致。
+    /// 生产主路径（live 分支）不走这里，走滚动视图自己的 pan 观察。
+    private var tabSwipeDragGesture: some Gesture {
         DragGesture()
             .onChanged { value in
-                // 边缘开始的滑动不切 tab（留给系统返回），也不跟手。
-                guard value.startLocation.x > 30 else { return }
-                // 第 17 轮：第一下 onChanged（任何方向、位移很小）就抑制点按。
-                // 纯点按不产生 onChanged（DragGesture 默认 minimumDistance 10pt），
-                // 所以不会误伤正常点击。点按抑制与滚动抑制拆开：点按抑制一有拖动
-                // 就开；滚动抑制（isScrollEnabled=false）仍只在横滑锁定后开，
-                // 竖向滚动不受影响。只在状态变化时赋值，避免 @Published 每次
-                // onChanged 都触发重渲染。
-                if !tapSuppression.isSuppressed { tapSuppression.isSuppressed = true }
-                let translation = value.translation
-                // 方向锁定（第 17 轮改、第 19 轮把量级门 8→20）：
-                // 未判定时看总位移——量级门是 20pt。起手前 ~10–15pt 的轨迹
-                // 主要是落指噪声（按下时的一点下钩、手指初动的抖动），在 8pt
-                // 处判方向经常锁错：横滑起手带下钩被锁成竖滑 → 不切 tab；
-                // 竖滑起手带横漂被锁成横滑 → isScrollEnabled=false 把滚动
-                // 杀掉、页面只横向跟手再弹回；且锁定后不再改判，错一次整
-                // 次手势都废。20pt 时有意方向已占主导，误锁率大幅下降。
-                // 横滑判定：横向分量达到竖向分量的 0.7 倍即判横滑
-                // （约 55° 以内都算横滑，斜滑也能切 tab）。竖滑用互补条件，
-                // 两者恰好互斥、无死区：|dx| > 0.7|dy| 与 |dy| > |dx|/0.7
-                // 必居其一。注意不能只放宽横滑条件而保留旧竖滑条件
-                // （|dy| > |dx|）：45°~55° 的斜滑会先撞上竖滑门（|dy| 先到
-                // 量级门）被判成竖滑，放宽就白做了。正常竖向滚动带少量横向漂移
-                // （通常 <30°）不会误切；漂到 55° 以内按用户要求算横滑。
-                // 一旦锁定不再改判，避免竖向滚动中途横向抖动，也避免横滑
-                // 中途被竖向分量抢走。代价：锁定前页面不跟手，锁定时 dragOffset
-                // 一次跳到当前位移（约 20pt，小半个指节），可接受；切 tab 阈值
-                // 仍是 |dx|>60（约 15% 屏宽，防误切），本次不改。
-                if let isHorizontal = isHorizontalDrag {
-                    guard isHorizontal else { return }
-                } else if max(abs(translation.width), abs(translation.height)) > 20 {
-                    if abs(translation.width) > abs(translation.height) * 0.7 {
-                        isHorizontalDrag = true
-                        dragSession += 1
-                        // 第 15 轮：横滑锁定开始，禁止两页内的点按与竖向滚动，直到
-                        // 落位动画结束（切换或弹回，见 onEnded / snapDragBack 的延迟复位）。
-                        suppressesPageInteractions = true
-                    } else {
-                        isHorizontalDrag = false
-                        // 竖滑：竖向滚动由滚动视图自己取消点按（竖向 pan 手势会
-                        // 取消 Button 的按压），点按抑制在这里就恢复——竖滑结束
-                        // 后点按立即恢复，不留 0.35s 死区。
-                        tapSuppression.isSuppressed = false
-                        return
-                    }
-                } else {
-                    return
-                }
-                // 无相邻页的方向不跟手（边缘页再滑就是死胡同，dragOffset 归 0）。
-                guard let target = adjacentTab(for: translation.width) else {
-                    dragOffset = 0
-                    dragTarget = nil
-                    return
-                }
-                // 目标页先挂载（isPageVisible），再跟手滑入——否则滑入的是空白卡片。
-                dragTarget = target
-                // 夹取到一页宽：incoming 页最多滑到最终位置，不超滑。
-                dragOffset = min(max(translation.width, -layoutWidth), layoutWidth)
+                handleTabSwipePanChanged(translation: value.translation, startLocation: value.startLocation)
             }
             .onEnded { value in
-                defer { isHorizontalDrag = nil }
-                // 非横滑（竖滑/斜滑/未判定）或边缘开始：不切 tab，弹回。
-                guard isHorizontalDrag == true,
-                      value.startLocation.x > 30
-                else {
-                    snapDragBack()
-                    return
-                }
-                let translation = value.translation
-                guard let target = adjacentTab(for: translation.width),
-                      abs(translation.width) > 60
-                else {
-                    snapDragBack()
-                    return
-                }
-                // 切换：selection 与 dragOffset 在同一个动画事务里一起变化——
-                // incoming 页从跟手位置平滑滑到最终位置，不跳变；dragTarget 随
-                // selection 一起清掉（incoming 页改由 selection 保持可见）。
-                // 第 15 轮：落位动画结束后再恢复两页内的点按与竖向滚动（0.35s =
-                // 动画 0.28s + 余量，与 snapDragBack 同 pattern）。会话编号校验：
-                // 落位期间若又开始一次新的横滑，旧的延迟清理不误删新锁定的禁止态。
-                let session = dragSession
-                withAnimation(.smooth(duration: 0.28)) {
-                    toolbarSelection.wrappedValue = target
-                    dragOffset = 0
-                    dragTarget = nil
-                }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                    guard dragSession == session else { return }
-                    suppressesPageInteractions = false
-                    // 第 17 轮：同处恢复点按抑制（拖动期间点按处理一直在读它）。
-                    tapSuppression.isSuppressed = false
-                }
+                handleTabSwipePanEnded(translation: value.translation, startLocation: value.startLocation)
             }
+    }
+
+    /// pan .changed 时的跟手逻辑（旧 tabSwipeGesture.onChanged 的等价改写）。
+    private func handleTabSwipePanChanged(translation: CGSize, startLocation: CGPoint) {
+        // 边缘开始的滑动不切 tab（留给系统返回），也不跟手。
+        guard startLocation.x > 30 else { return }
+        // 第 17 轮：第一下 pan（任何方向、位移很小）就抑制点按。纯点按不产生
+        // pan 回调，所以不会误伤正常点击。点按抑制与滚动抑制拆开：点按抑制
+        // 一有拖动就开；滚动抑制（isScrollEnabled=false）仍只在横滑锁定后开，
+        // 竖向滚动不受影响。只在状态变化时赋值，避免 @Published 每次 pan
+        // 都触发重渲染。
+        if !tapSuppression.isSuppressed { tapSuppression.isSuppressed = true }
+        // 方向锁定（第 17 轮改、第 19 轮把量级门 8→20，第 20 轮改跟手策略）：
+        // 未判定时看总位移——锁定量级门仍是 20pt。起手前 ~10–15pt 的轨迹
+        // 主要是落指噪声（按下时的一点下钩、手指初动的抖动），在 8pt 处判
+        // 方向经常锁错：横滑起手带下钩被锁成竖滑 → 不切 tab；竖滑起手带横漂
+        // 被锁成横滑 → isScrollEnabled=false 把滚动杀掉、页面只横向跟手
+        // 再弹回；且锁定后不再改判，错一次整次手势都废。20pt 时有意方向已
+        // 占主导，误锁率大幅下降。横滑判定：横向分量达到竖向分量的 0.7 倍
+        // 即判横滑（约 55° 以内都算横滑，斜滑也能切 tab）。竖滑用互补条件，
+        // 两者恰好互斥、无死区：|dx| > 0.7|dy| 与 |dy| > |dx|/0.7 必居其一。
+        // 注意不能只放宽横滑条件而保留旧竖滑条件（|dy| > |dx|）：45°~55°
+        // 的斜滑会先撞上竖滑门（|dy| 先到量级门）被判成竖滑，放宽就白做了。
+        // 正常竖向滚动带少量横向漂移（通常 <30°）不会误切；漂到 55° 以内
+        // 按用户要求算横滑。一旦锁定不再改判，避免竖向滚动中途横向抖动，
+        // 也避免横滑中途被竖向分量抢走。切 tab 阈值仍是 |dx|>60（约 15%
+        // 屏宽，防误切），本次不改。
+        if let isHorizontal = isHorizontalDrag {
+            guard isHorizontal else { return }
+        } else if max(abs(translation.width), abs(translation.height)) > 20 {
+            if abs(translation.width) > abs(translation.height) * 0.7 {
+                isHorizontalDrag = true
+                dragSession += 1
+                // 第 15 轮：横滑锁定开始，禁止两页内的点按与竖向滚动，直到
+                // 落位动画结束（切换或弹回，见 onEnded / snapDragBack 的延迟复位）。
+                suppressesPageInteractions = true
+            } else {
+                isHorizontalDrag = false
+                // 竖滑：竖向滚动由滚动视图自己取消点按（竖向 pan 手势会
+                // 取消 Button 的按压），点按抑制在这里就恢复——竖滑结束
+                // 后点按立即恢复，不留 0.35s 死区。
+                tapSuppression.isSuppressed = false
+                // 第 20 轮：同时清掉上一手势残留的滚动抑制。suppressesPageInteractions
+                // 只在横滑锁定一处被置上、只在松手落位后的 0.35s 延迟里复位；
+                // 若用户在 0.35s 窗口内又开始一次新的竖滑，旧的延迟复位还没跑到，
+                // isScrollEnabled 仍是 false，本次竖滑的起手就被吃掉——连续滑动
+                // 顿的根因之一。竖滑锁定时立即复位（本次手势是竖滑，不需要滚动
+                // 抑制；即使上一手势的延迟复位稍后跑到，也只是重复清 false）。
+                suppressesPageInteractions = false
+                // 第 20 轮：若 8–20pt 间已有先行跟手（见下），竖滑锁定时把它
+                // 平滑归 0（不留横向残影；0.15s 短动画，不与竖滑冲突）。
+                if dragOffset != 0 || dragTarget != nil {
+                    dragTarget = nil
+                    withAnimation(.smooth(duration: 0.15)) { dragOffset = 0 }
+                }
+                return
+            }
+        } else if max(abs(translation.width), abs(translation.height)) > 8,
+                  abs(translation.width) > abs(translation.height) * 0.7 {
+            // 第 20 轮：锁定前先行跟手。旧逻辑在 20pt 量级门之前完全不跟手，
+            // 锁定时 dragOffset 一次跳到约 20pt——手指动了 20pt、页面才突然跳，
+            // 这就是横滑“不跟手”的死区，也是第 19 轮 20pt 门没解决问题的原因
+            // （门越长，死区越大）。现改为：8pt 起、横向占优时先按横向分量跟手
+            // （dragOffset 实时更新），到 20pt 再正式锁定；8–20pt 间若方向反转
+            // 为竖滑（|dy| 占优），竖滑锁定分支把它平滑归 0，不留残影；松手时
+            // 若仍未锁定，snapDragBack 弹回。8pt 门与 DragGesture 的
+            // minimumDistance 10pt 同量级，纯点按不产生 pan 回调，不误伤点击；
+            // 斜滑 45°~55° 仍按 0.7 比值判横滑，判定本身没变。
+            guard let target = adjacentTab(for: translation.width) else {
+                dragOffset = 0
+                dragTarget = nil
+                return
+            }
+            dragTarget = target
+            dragOffset = min(max(translation.width, -layoutWidth), layoutWidth)
+            return
+        } else {
+            return
+        }
+        // 无相邻页的方向不跟手（边缘页再滑就是死胡同，dragOffset 归 0）。
+        guard let target = adjacentTab(for: translation.width) else {
+            dragOffset = 0
+            dragTarget = nil
+            return
+        }
+        // 目标页先挂载（isPageVisible），再跟手滑入——否则滑入的是空白卡片。
+        dragTarget = target
+        // 夹取到一页宽：incoming 页最多滑到最终位置，不超滑。
+        dragOffset = min(max(translation.width, -layoutWidth), layoutWidth)
+    }
+
+    /// pan .ended/.cancelled 时的松手逻辑（旧 tabSwipeGesture.onEnded 的等价改写）。
+    private func handleTabSwipePanEnded(translation: CGSize, startLocation: CGPoint) {
+        defer { isHorizontalDrag = nil }
+        // 非横滑（竖滑/斜滑/未判定）或边缘开始：不切 tab，弹回。
+        guard isHorizontalDrag == true,
+              startLocation.x > 30
+        else {
+            snapDragBack()
+            return
+        }
+        guard let target = adjacentTab(for: translation.width),
+              abs(translation.width) > 60
+        else {
+            snapDragBack()
+            return
+        }
+        // 切换：selection 与 dragOffset 在同一个动画事务里一起变化——
+        // incoming 页从跟手位置平滑滑到最终位置，不跳变；dragTarget 随
+        // selection 一起清掉（incoming 页改由 selection 保持可见）。
+        // 第 15 轮：落位动画结束后再恢复两页内的点按与竖向滚动（0.35s =
+        // 动画 0.28s + 余量，与 snapDragBack 同 pattern）。会话编号校验：
+        // 落位期间若又开始一次新的横滑，旧的延迟清理不误删新锁定的禁止态。
+        let session = dragSession
+        withAnimation(.smooth(duration: 0.28)) {
+            toolbarSelection.wrappedValue = target
+            dragOffset = 0
+            dragTarget = nil
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            guard dragSession == session else { return }
+            suppressesPageInteractions = false
+            // 第 17 轮：同处恢复点按抑制（拖动期间点按处理一直在读它）。
+            tapSuppression.isSuppressed = false
+        }
     }
 
     /// 跟手偏移弹回 0（第 14 轮）：不足阈值 / 无相邻页 / 非横滑时不切 tab，
@@ -382,6 +455,10 @@ struct VideoDetailNativeContentTabView<Content: View>: View {
                         // 在 suppressesScrolling 之后、showsBottomEdgeEffect
                         // 之前，调用顺序与声明一致）。
                         tapSuppression: tapSuppression,
+                        // 第 20 轮：tab 切换的 pan 回调（滚动视图自己的 pan 观察者，
+                        // 声明在 tapSuppression 之后、showsBottomEdgeEffect 之前，
+                        // 调用顺序与声明一致）。
+                        onTabSwipePan: tabSwipePanHandler,
                         showsBottomEdgeEffect: !hidesBottomToolbar,
                         scrollAdjustment: scrollAdjustment,
                         onScrollOffsetChange: onScrollOffsetChange,
@@ -413,6 +490,9 @@ struct VideoDetailNativeContentTabView<Content: View>: View {
                 // 第 17 轮：拖动期间禁止点按的共享状态（引用类型，声明在
                 // suppressesScrolling 之后、content 之前，调用顺序与声明一致）。
                 tapSuppression: tapSuppression,
+                // 第 20 轮：tab 切换的 pan 回调（滚动视图自己的 pan 观察者，
+                // 声明在 tapSuppression 之后、content 之前，调用顺序与声明一致）。
+                onTabSwipePan: tabSwipePanHandler,
                 content: pageContent
             )
         } else {
@@ -430,6 +510,11 @@ struct VideoDetailNativeContentTabView<Content: View>: View {
                 suppressesScrolling: suppressesPageInteractions,
                 content: { _ in pageContent() }
             )
+            // 第 20 轮：非 live 分支（纯 SwiftUI ScrollView，初始播放阶段与
+            // UITest 夹具用）没有 UIKit 滚动视图可观察，保留旧的 DragGesture
+            // （调同一套 handleTabSwipePanChanged/Ended）以免该分支失去滑动切 tab。
+            // 生产主路径走 live 分支的 pan 观察，不受此影响。
+            .simultaneousGesture(tabSwipeDragGesture)
         }
     }
 }
@@ -456,6 +541,10 @@ private struct VideoDetailInteractiveScrollingTabPage<Content: View>: View {
     /// 与 suppressesScrolling 同理。声明在 suppressesScrolling 之后、
     /// content 之前，调用顺序与声明一致。
     var tapSuppression: VideoDetailTapSuppression? = nil
+    /// tab 切换的 pan 回调（第 20 轮）：滚动视图自己的 pan 观察者。
+    /// 必须是 var：与 suppressesScrolling 同理。声明在 tapSuppression 之后、
+    /// content 之前，调用顺序与声明一致。
+    var onTabSwipePan: VideoDetailTabSwipePanHandler? = nil
     let content: () -> Content
 
     var body: some View {
@@ -477,6 +566,7 @@ private struct VideoDetailInteractiveScrollingTabPage<Content: View>: View {
                 standardHorizontalInset: standardHorizontalInset,
                 suppressesScrolling: suppressesScrolling,
                 tapSuppression: tapSuppression,
+                onTabSwipePan: onTabSwipePan,
                 content: content
             )
         }
@@ -506,6 +596,10 @@ private struct VideoDetailInteractiveScrollHost<Content: View>: UIViewRepresenta
     /// 与 suppressesScrolling 同理。声明在 suppressesScrolling 之后、
     /// content 之前，调用顺序与声明一致。
     var tapSuppression: VideoDetailTapSuppression? = nil
+    /// tab 切换的 pan 回调（第 20 轮）：滚动视图自己的 pan 观察者。
+    /// 必须是 var：与 suppressesScrolling 同理。声明在 tapSuppression 之后、
+    /// content 之前，调用顺序与声明一致。
+    var onTabSwipePan: VideoDetailTabSwipePanHandler? = nil
     let content: () -> Content
 
     func makeCoordinator() -> Coordinator {
@@ -523,6 +617,15 @@ private struct VideoDetailInteractiveScrollHost<Content: View>: UIViewRepresenta
         // 标志已为 true）；updateUIView 里随标志变化同步开关。
         scrollView.isScrollEnabled = !suppressesScrolling
         scrollView.delegate = context.coordinator
+        // 第 20 轮：观察滚动视图自己的 panGestureRecognizer（不新增识别器、
+        // 不改 delegate，只是给已有的 pan 加一个 target）。pan 是滚动视图
+        // 唯一的识别者，没有祖先层 DragGesture 参与识别，竖滑不再被拖住。
+        // target 的回调在 Coordinator.handleTabSwipePan，回调闭包经 update
+        // 同步进 Coordinator（与 onScrollOffsetChange 同 pattern）。
+        scrollView.panGestureRecognizer.addTarget(
+            context.coordinator,
+            action: #selector(Coordinator.handleTabSwipePan(_:))
+        )
         scrollView.configureBottomEdgeEffect(enabled: bottomEdgeBlurEnabled, isActiveContent: isActiveContent)
 
         let hostingController = UIHostingController(rootView: scrollContent)
@@ -547,6 +650,7 @@ private struct VideoDetailInteractiveScrollHost<Content: View>: UIViewRepresenta
             scrollAdjustment: scrollAdjustment,
             onScrollOffsetChange: onScrollOffsetChange,
             onScrollPhaseChange: onScrollPhaseChange,
+            onTabSwipePan: onTabSwipePan,
             bottomInset: bottomInset,
             contentConfiguration: contentConfiguration
         )
@@ -580,6 +684,7 @@ private struct VideoDetailInteractiveScrollHost<Content: View>: UIViewRepresenta
             scrollAdjustment: scrollAdjustment,
             onScrollOffsetChange: onScrollOffsetChange,
             onScrollPhaseChange: onScrollPhaseChange,
+            onTabSwipePan: onTabSwipePan,
             bottomInset: bottomInset,
             contentConfiguration: contentConfiguration
         )
@@ -649,6 +754,8 @@ private struct VideoDetailInteractiveScrollHost<Content: View>: UIViewRepresenta
         private var tab: VideoDetailContentTab?
         private var onScrollOffsetChange: ((VideoDetailContentTab, CGFloat) -> Void)?
         private var onScrollPhaseChange: ((VideoDetailContentTab, ScrollPhase) -> Void)?
+        /// tab 切换的 pan 回调（第 20 轮）：由 update 同步进来的闭包，见 handleTabSwipePan。
+        private var onTabSwipePan: VideoDetailTabSwipePanHandler?
         private var appliedScrollAdjustmentToken: Int?
         private var isApplyingScrollAdjustment = false
         private var virtualScrollOffset: CGFloat = 0
@@ -664,6 +771,7 @@ private struct VideoDetailInteractiveScrollHost<Content: View>: UIViewRepresenta
             scrollAdjustment: VideoDetailScrollAdjustment?,
             onScrollOffsetChange: ((VideoDetailContentTab, CGFloat) -> Void)?,
             onScrollPhaseChange: ((VideoDetailContentTab, ScrollPhase) -> Void)?,
+            onTabSwipePan: VideoDetailTabSwipePanHandler?,
             bottomInset: CGFloat,
             contentConfiguration: ContentConfiguration
         ) {
@@ -673,6 +781,7 @@ private struct VideoDetailInteractiveScrollHost<Content: View>: UIViewRepresenta
             self.tab = tab
             self.onScrollOffsetChange = onScrollOffsetChange
             self.onScrollPhaseChange = onScrollPhaseChange
+            self.onTabSwipePan = onTabSwipePan
             self.contentConfiguration = contentConfiguration
             if tabChanged {
                 lastReportedVirtualScrollOffset = nil
@@ -700,6 +809,30 @@ private struct VideoDetailInteractiveScrollHost<Content: View>: UIViewRepresenta
             guard let tab else { return }
             hasUserScrolled = true
             onScrollPhaseChange?(tab, .tracking)
+        }
+
+        /// 第 20 轮：滚动视图自己的 pan 的观察回调（makeUIView 里用 addTarget 挂上）。
+        /// 不新增识别器、不改 delegate——只是读 pan 的位移/落点/状态，转发给 tab 视图
+        /// 的 tabSwipePanHandler（跟手切 tab）。因为 pan 是滚动视图唯一的识别者，
+        /// 没有祖先层 DragGesture 参与识别，竖滑不再被拖住。落点由当前位置减累计
+        /// 位移还原（pan.translation 是从落点起的累计值），与旧 DragGesture 的
+        /// value.startLocation 等价；边缘判定（x ≤ 30 留给系统返回）仍在 tab 视图
+        /// 的 handleTabSwipePanChanged/Ended 里做。@objc 是 target-action 的要求；
+        /// Coordinator 本身已是 @MainActor（UIScrollViewDelegate 方法同是 @objc），
+        /// pan 回调在主线程触发，与 @MainActor 隔离一致。
+        @objc fileprivate func handleTabSwipePan(_ pan: UIPanGestureRecognizer) {
+            let scrollView = pan.view as? UIScrollView
+            let translation = pan.translation(in: scrollView)
+            let location = pan.location(in: scrollView)
+            let startLocation = CGPoint(
+                x: location.x - translation.x,
+                y: location.y - translation.y
+            )
+            onTabSwipePan?(
+                CGSize(width: translation.x, height: translation.y),
+                startLocation,
+                pan.state
+            )
         }
 
         func scrollViewDidScroll(_ scrollView: UIScrollView) {

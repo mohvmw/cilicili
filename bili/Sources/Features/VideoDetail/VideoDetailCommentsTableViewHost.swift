@@ -72,6 +72,9 @@ struct VideoDetailCommentsTableViewHost: UIViewRepresentable {
             // 第 17 轮：拖动期间禁止点按的共享状态（声明在 suppressesScrolling
             // 之后、showsBottomEdgeEffect 之前，调用顺序与声明一致）。
             tapSuppression: context.tapSuppression,
+            // 第 20 轮：tab 切换的 pan 回调（声明在 tapSuppression 之后、
+            // showsBottomEdgeEffect 之前，调用顺序与声明一致）。
+            onTabSwipePan: context.onTabSwipePan,
             showsBottomEdgeEffect: context.showsBottomEdgeEffect,
             onScrollOffsetChange: context.onScrollOffsetChange,
             onScrollPhaseChange: context.onScrollPhaseChange
@@ -237,6 +240,10 @@ extension VideoDetailCommentsTableViewHost {
             /// 与 suppressesScrolling 同理。声明在 suppressesScrolling 之后、
             /// showsBottomEdgeEffect 之前，调用顺序与声明一致。
             var tapSuppression: VideoDetailTapSuppression? = nil
+            /// tab 切换的 pan 回调（第 20 轮）：评论 UITableView 自己的 pan 观察者。
+            /// 必须是 var：与 suppressesScrolling 同理。声明在 tapSuppression 之后、
+            /// showsBottomEdgeEffect 之前，调用顺序与声明一致。
+            var onTabSwipePan: VideoDetailTabSwipePanHandler? = nil
             let showsBottomEdgeEffect: Bool
             let onScrollOffsetChange: ((VideoDetailContentTab, CGFloat) -> Void)?
             let onScrollPhaseChange: ((VideoDetailContentTab, ScrollPhase) -> Void)?
@@ -374,6 +381,17 @@ extension VideoDetailCommentsTableViewHost {
             // 第 15 轮：横滑锁定期间创建即禁滚（评论页在拖动开始时挂载，此时
             // 标志已为 true）；update 里随标志变化同步开关。
             view.isScrollEnabled = !props.suppressesScrolling
+            // 第 20 轮：观察表格视图自己的 panGestureRecognizer（不新增识别器、
+            // 不改 delegate，只是给已有的 pan 加一个 target）。pan 是表格视图
+            // 唯一的识别者，没有祖先层 DragGesture 参与识别，竖滑不再被拖住。
+            // 注意：这里不能用“额外加一个手势识别器”的做法——本文件
+            // VideoDetailCommentsTableView.touchesBegan 注释已写明，额外的识别器
+            // 会在减速触摸时把表格 pan 按互斥规则强制 fail、手感明显不跟手。
+            // 回调闭包在 props 里（update 整体替换 props，读到的永远是最新闭包）。
+            view.panGestureRecognizer.addTarget(
+                self,
+                action: #selector(Coordinator.handleTabSwipePan(_:))
+            )
             view.configureBottomEdgeEffect(
                 enabled: props.showsBottomEdgeEffect,
                 isActiveContent: props.isActive
@@ -389,6 +407,30 @@ extension VideoDetailCommentsTableViewHost {
                 pendingScrollAdjustment = scrollAdjustment
             }
             scheduleLayoutAdjustment()
+        }
+
+        /// 第 20 轮：表格视图自己的 pan 的观察回调（attach 里用 addTarget 挂上）。
+        /// 不新增识别器、不改 delegate——只是读 pan 的位移/落点/状态，转发给 tab 视图
+        /// 的 tabSwipePanHandler（跟手切 tab）。因为 pan 是表格视图唯一的识别者，
+        /// 没有祖先层 DragGesture 参与识别，竖滑不再被拖住。落点由当前位置减累计
+        /// 位移还原（pan.translation 是从落点起的累计值），与旧 DragGesture 的
+        /// value.startLocation 等价；边缘判定（x ≤ 30 留给系统返回）仍在 tab 视图
+        /// 的 handleTabSwipePanChanged/Ended 里做。@objc 是 target-action 的要求；
+        /// Coordinator 本身已是 @MainActor，pan 回调在主线程触发，与隔离一致。
+        /// 回调闭包从 props 里取（update 整体替换 props，读到的永远是最新闭包）。
+        @objc func handleTabSwipePan(_ pan: UIPanGestureRecognizer) {
+            let tableView = pan.view as? UITableView
+            let translation = pan.translation(in: tableView)
+            let location = pan.location(in: tableView)
+            let startLocation = CGPoint(
+                x: location.x - translation.x,
+                y: location.y - translation.y
+            )
+            props.onTabSwipePan?(
+                CGSize(width: translation.x, height: translation.y),
+                startLocation,
+                pan.state
+            )
         }
 
         func detach() {

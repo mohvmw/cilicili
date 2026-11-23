@@ -22,6 +22,10 @@ struct VideoDetailCommentsPageContext {
     /// 与 suppressesScrolling 同理。声明在 suppressesScrolling 之后、
     /// showsBottomEdgeEffect 之前，调用顺序与声明一致。
     var tapSuppression: VideoDetailTapSuppression? = nil
+    /// tab 切换的 pan 回调（第 20 轮）：评论 UITableView 自己的 pan 观察者。
+    /// 必须是 var：与 suppressesScrolling 同理。声明在 tapSuppression 之后、
+    /// showsBottomEdgeEffect 之前，调用顺序与声明一致。
+    var onTabSwipePan: VideoDetailTabSwipePanHandler? = nil
     /// 底部软边缘（.soft + 工具栏交互），与简介页滚动容器保持一致。
     let showsBottomEdgeEffect: Bool
     let scrollAdjustment: VideoDetailScrollAdjustment?
