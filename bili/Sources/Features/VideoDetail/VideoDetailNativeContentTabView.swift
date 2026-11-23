@@ -328,12 +328,15 @@ struct VideoDetailNativeContentTabView<Content: View>: View {
                         minimumPlayerHeight: interactiveMinimumPlayerHeight,
                         standardHorizontalInset: standardHorizontalInset,
                         isActive: isPageVisible(tab),
+                        // 第 15 轮：横滑锁定/落位期间禁止评论列表竖向滚动。
+                        // 注意参数顺序：结构体里 suppressesScrolling 声明在
+                        // showsBottomEdgeEffect 之前，调用时也必须在它之前，
+                        // 否则编译报错（argument must precede）。
+                        suppressesScrolling: suppressesPageInteractions,
                         showsBottomEdgeEffect: !hidesBottomToolbar,
                         scrollAdjustment: scrollAdjustment,
                         onScrollOffsetChange: onScrollOffsetChange,
-                        onScrollPhaseChange: onScrollPhaseChange,
-                        // 第 15 轮：横滑锁定/落位期间禁止评论列表竖向滚动。
-                        suppressesScrolling: suppressesPageInteractions
+                        onScrollPhaseChange: onScrollPhaseChange
                     )
                 )
             } else {
