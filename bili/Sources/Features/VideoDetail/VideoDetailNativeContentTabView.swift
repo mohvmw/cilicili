@@ -359,6 +359,28 @@ struct VideoDetailNativeContentTabView<Content: View>: View {
         }
     }
 
+    /// 点 tab 栏时的强制复位（第 21 轮，第 20 轮回归的兜底）。
+    /// dragOffset 与 suppressesPageInteractions 只在 pan 的 .ended/.cancelled
+    /// 里复位，而 pan 被 isScrollEnabled=false 取消时 .cancelled 可能不送达
+    /// target-action，导致两者卡住（页面错位 + 滚动全死）。点 tab 栏是用户
+    /// 一定能触发的路径（Button 不受滚动抑制影响），在这里强制复位，保证点
+    /// tab 后页面回正、滚动恢复。dragSession +1 让之前挂起的 0.35s 延迟复位
+    /// 失效（已由本次复位代替，也防止旧复位在新拖动的 early-follow 阶段误删
+    /// 刚置上的点按抑制）。
+    /// 注意：只在 tab 栏 Button 里调，不要放进 toolbarSelection 的 setter——
+    /// 滑动切 tab 也走 setter，放进去会把滑动切换的落位复位会话号冲掉
+    /// （handleTabSwipePanEnded 先取 session、再经 setter 改 selection，
+    /// setter 里 +1 会让它的 0.35s 延迟复位被会话校验拦掉，滚动抑制就一直
+    /// 留着）。
+    private func resetDragStateForTabBarTap() {
+        dragSession += 1
+        dragOffset = 0
+        dragTarget = nil
+        isHorizontalDrag = nil
+        suppressesPageInteractions = false
+        tapSuppression.isSuppressed = false
+    }
+
     private var toolbarSelection: Binding<VideoDetailContentTab> {
         Binding(
             get: { selection },
@@ -385,6 +407,16 @@ struct VideoDetailNativeContentTabView<Content: View>: View {
         HStack(spacing: 24) {
             ForEach(VideoDetailContentTab.allCases) { tab in
                 Button {
+                    // 第 21 轮：点 tab 栏时强制复位拖动状态（第 20 轮回归的兜底）。
+                    // dragOffset 与 suppressesPageInteractions 只在 pan 的
+                    // .ended/.cancelled 里复位，而 pan 被 isScrollEnabled=false
+                    // 取消时 .cancelled 可能不送达 target-action，导致两者卡住
+                    // （页面错位 + 滚动全死）。点 tab 栏是用户一定能触发的路径
+                    // （Button 不受滚动抑制影响），在这里强制复位，保证点 tab
+                    // 后页面回正、滚动恢复。即使点的是当前 tab 也复位（selection
+                    // 不变时 toolbarSelection 的 setter 直接返回，不会触发复位，
+                    // 但卡住的状态仍需清掉）。
+                    resetDragStateForTabBarTap()
                     toolbarSelection.wrappedValue = tab
                 } label: {
                     VStack(spacing: 6) {
@@ -855,6 +887,32 @@ private struct VideoDetailInteractiveScrollHost<Content: View>: UIViewRepresenta
         func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
             guard let tab else { return }
             onScrollPhaseChange?(tab, decelerate ? .decelerating : .idle)
+            // 第 21 轮：松手复位的兜底（第 20 轮回归）。dragOffset 与
+            // suppressesPageInteractions 只在 pan 的 .ended/.cancelled 里复位，
+            // 而 pan 被 isScrollEnabled=false 取消时 .cancelled 可能不送达
+            // target-action，导致两者卡住（页面错位 + 滚动全死）。
+            // scrollViewDidEndDragging 是 scroll view 自身的拖动结束通知，
+            // 经 delegate 送达，不依赖 pan 的 target-action；在这里补一次
+            // .ended 复位。若 pan 的 .ended 已先送达，这里是第二次调用——
+            // handleTabSwipePanEnded/snapDragBack 是幂等的（isHorizontalDrag
+            // 已被第一次调用的 defer 置 nil，第二次走 snapDragBack；两次
+            // 0.35s 延迟复位用同一会话号，清的是同一批标志），不会二次切 tab。
+            // 竖滑时 isHorizontalDrag 为 false，同样走 snapDragBack，
+            // dragOffset 本来就是 0、标志本来就是关的，等于无操作。
+            // 状态固定传 .ended 而不用 pan.state：若 pan 仍在 .changed 就
+            // 传 .changed 会重新跟手，.ended 保证走复位路径。
+            let pan = scrollView.panGestureRecognizer
+            let translation = pan.translation(in: scrollView)
+            let location = pan.location(in: scrollView)
+            let startLocation = CGPoint(
+                x: location.x - translation.x,
+                y: location.y - translation.y
+            )
+            onTabSwipePan?(
+                CGSize(width: translation.width, height: translation.height),
+                startLocation,
+                .ended
+            )
         }
 
         func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {

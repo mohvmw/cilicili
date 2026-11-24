@@ -1123,6 +1123,30 @@ extension VideoDetailCommentsTableViewHost {
             willDecelerate decelerate: Bool
         ) {
             reportPhase(decelerate ? .decelerating : .idle)
+            // 第 21 轮：松手复位的兜底（第 20 轮回归，与简介页 ScrollHost 同理）。
+            // dragOffset 与 suppressesPageInteractions 只在 pan 的 .ended/.cancelled
+            // 里复位，而 pan 被 isScrollEnabled=false 取消时 .cancelled 可能不送达
+            // target-action，导致两者卡住（页面错位 + 滚动全死）。
+            // scrollViewDidEndDragging 是表格视图自身的拖动结束通知，经 delegate
+            // 送达，不依赖 pan 的 target-action；在这里补一次 .ended 复位。
+            // 与 pan 的 .ended 重复触发时幂等，不会二次切 tab（见 tab 视图的
+            // handleTabSwipePanEnded/snapDragBack，第一次调用的 defer 已把
+            // isHorizontalDrag 置 nil）；竖滑时等于无操作。状态固定传 .ended
+            // 而不用 pan.state：若 pan 仍在 .changed 就传 .changed 会重新跟手，
+            // .ended 保证走复位路径。回调闭包从 props 里取（update 整体替换
+            // props，读到的永远是最新闭包）。
+            let pan = scrollView.panGestureRecognizer
+            let translation = pan.translation(in: scrollView)
+            let location = pan.location(in: scrollView)
+            let startLocation = CGPoint(
+                x: location.x - translation.x,
+                y: location.y - translation.y
+            )
+            props.onTabSwipePan?(
+                CGSize(width: translation.width, height: translation.height),
+                startLocation,
+                .ended
+            )
         }
 
         func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
