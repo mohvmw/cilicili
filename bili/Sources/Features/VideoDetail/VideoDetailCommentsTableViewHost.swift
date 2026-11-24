@@ -1143,7 +1143,7 @@ extension VideoDetailCommentsTableViewHost {
                 y: location.y - translation.y
             )
             props.onTabSwipePan?(
-                CGSize(width: translation.width, height: translation.height),
+                CGSize(width: translation.x, height: translation.y),
                 startLocation,
                 .ended
             )
