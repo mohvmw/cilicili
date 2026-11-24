@@ -478,11 +478,14 @@ struct VideoDetailNativeContentTabView<Content: View>: View {
                         minimumPlayerHeight: interactiveMinimumPlayerHeight,
                         standardHorizontalInset: standardHorizontalInset,
                         isActive: isPageVisible(tab),
-                        // 第 15 轮：横滑锁定/落位期间禁止评论列表竖向滚动。
+                        // 第 22 轮：不再禁滚。横滑锁定时置 isScrollEnabled=false
+                        // 会取消正在观察的 pan，导致 .ended 不送达、dragOffset
+                        // 与抑制位卡死（第 21 轮的 scrollViewDidEndDragging
+                        // 兜底在真机上也没触发）。竖向漂移的代价可以接受。
                         // 注意参数顺序：结构体里 suppressesScrolling 声明在
                         // showsBottomEdgeEffect 之前，调用时也必须在它之前，
                         // 否则编译报错（argument must precede）。
-                        suppressesScrolling: suppressesPageInteractions,
+                        suppressesScrolling: false,
                         // 第 17 轮：拖动期间禁止点按的共享状态（引用类型，声明
                         // 在 suppressesScrolling 之后、showsBottomEdgeEffect
                         // 之前，调用顺序与声明一致）。
@@ -517,8 +520,8 @@ struct VideoDetailNativeContentTabView<Content: View>: View {
                 contentMountsSecondaryContent: mountsPageContent,
                 bottomInset: bottomInset + bottomToolbarReservedHeight + 16,
                 standardHorizontalInset: standardHorizontalInset,
-                // 第 15 轮：横滑锁定/落位期间禁止简介页竖向滚动。
-                suppressesScrolling: suppressesPageInteractions,
+                // 第 22 轮：不再禁滚（与 live 分支同理）。
+                suppressesScrolling: false,
                 // 第 17 轮：拖动期间禁止点按的共享状态（引用类型，声明在
                 // suppressesScrolling 之后、content 之前，调用顺序与声明一致）。
                 tapSuppression: tapSuppression,
@@ -538,8 +541,8 @@ struct VideoDetailNativeContentTabView<Content: View>: View {
                 minimumPlayerHeight: 0,
                 bottomInset: bottomInset + bottomToolbarReservedHeight + 16,
                 standardHorizontalInset: standardHorizontalInset,
-                // 第 15 轮：横滑锁定/落位期间禁止简介页竖向滚动（与 live 分支同行为）。
-                suppressesScrolling: suppressesPageInteractions,
+                // 第 22 轮：不再禁滚（与 live 分支同理）。
+                suppressesScrolling: false,
                 content: { _ in pageContent() }
             )
             // 第 20 轮：非 live 分支（纯 SwiftUI ScrollView，初始播放阶段与
@@ -645,8 +648,8 @@ private struct VideoDetailInteractiveScrollHost<Content: View>: UIViewRepresenta
         scrollView.showsVerticalScrollIndicator = false
         scrollView.showsHorizontalScrollIndicator = false
         scrollView.contentInsetAdjustmentBehavior = .never
-        // 第 15 轮：横滑锁定期间创建即禁滚（incoming 页在拖动开始时挂载，此时
-        // 标志已为 true）；updateUIView 里随标志变化同步开关。
+        // 第 22 轮：suppressesScrolling 恒为 false（见上），此处恒为可滚。
+        // 保留这行是为了不改结构体；禁滚的耦合已在源头移除。
         scrollView.isScrollEnabled = !suppressesScrolling
         scrollView.delegate = context.coordinator
         // 第 20 轮：观察滚动视图自己的 panGestureRecognizer（不新增识别器、
@@ -693,10 +696,7 @@ private struct VideoDetailInteractiveScrollHost<Content: View>: UIViewRepresenta
         // Opacity/accessibilityHidden on the SwiftUI wrapper does not reliably
         // remove a nested UIHostingController's UIKit subtree from VoiceOver.
         scrollView.accessibilityElementsHidden = !isActiveContent
-        // 第 15 轮：横滑锁定/落位期间禁滚。UIKit 里中途置 isScrollEnabled=false
-        // 会立即停掉正在进行的滚动（光关 hit testing 拦不住已在进行的滚动）。
-        // 两页默认都是可滚的（从未在别处关过 isScrollEnabled），恢复 true 不会
-        // 把原本就关掉滚动的页面误打开。
+        // 第 22 轮：suppressesScrolling 恒为 false，此处恒为可滚（见上）。
         scrollView.isScrollEnabled = !suppressesScrolling
         (scrollView as? VideoDetailEdgeEffectScrollView)?.configureBottomEdgeEffect(
             enabled: bottomEdgeBlurEnabled, isActiveContent: isActiveContent

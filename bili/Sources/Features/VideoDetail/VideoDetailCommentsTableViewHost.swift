@@ -378,8 +378,7 @@ extension VideoDetailCommentsTableViewHost {
                 right: 0
             )
             view.contentOffset = CGPoint(x: 0, y: -appliedTopInset)
-            // 第 15 轮：横滑锁定期间创建即禁滚（评论页在拖动开始时挂载，此时
-            // 标志已为 true）；update 里随标志变化同步开关。
+            // 第 22 轮：suppressesScrolling 恒为 false，此处恒为可滚（见 tab 视图）。
             view.isScrollEnabled = !props.suppressesScrolling
             // 第 20 轮：观察表格视图自己的 panGestureRecognizer（不新增识别器、
             // 不改 delegate，只是给已有的 pan 加一个 target）。pan 是表格视图
@@ -457,10 +456,7 @@ extension VideoDetailCommentsTableViewHost {
             // 视频切换会换一个 render store：重订阅并整表刷新。
             let storeChanged = props.store !== self.props.store
             self.props = props
-            // 第 15 轮：横滑锁定/落位期间禁滚。UIKit 里中途置 isScrollEnabled=false
-            // 会立即停掉正在进行的滚动（光关 hit testing 拦不住已在进行的滚动）。
-            // 评论列表默认可滚（从未在别处关过 isScrollEnabled），恢复 true 不会
-            // 把原本就关掉滚动的页面误打开。
+            // 第 22 轮：suppressesScrolling 恒为 false，此处恒为可滚（见 tab 视图）。
             tableView?.isScrollEnabled = !props.suppressesScrolling
             tableView?.configureBottomEdgeEffect(
                 enabled: props.showsBottomEdgeEffect,
